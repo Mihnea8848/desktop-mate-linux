@@ -74,6 +74,33 @@ when that fails it unloads the character and stops rendering, which looks like
 a frozen image. `launch.sh` watches the link and restores it, and
 `tools/run-in-game.sh` starts test programs with the right environment.
 
+## The Linux section in the game's settings
+
+`ghost.exe` loads `dmhook.dll` into the game process. The game is protected
+against mods, so a few things are needed before the library can do anything:
+
+- The il2cpp API functions are exported under random names.
+  `scripts/il2cpp-map.py` recovers the real names from `UnityPlayer.dll`, which
+  looks them up in the fixed order of Unity's API list. `launch.sh` writes the
+  map to `/dev/shm/ghost-bridge/il2cpp-map.txt` on every start, so it follows
+  game updates.
+- Most of those functions crash the game when called from outside
+  `GameAssembly.dll` or `UnityPlayer.dll`. The check keeps the allowed address
+  ranges in two variables; `dmhook.dll` finds them in the code of one export and
+  widens the GameAssembly range.
+- The game's own classes are renamed as well, so the library only uses Unity's
+  classes (UI Toolkit, `Application`) and the element names from the game's
+  layout, such as `common-section`.
+
+All calls into the game run on its main thread: the library subclasses the
+game window and handles a message it posts to itself twice a second. The
+section is built from Unity `Toggle` and `Label` elements with the game's own
+style classes; the check boxes are drawn with inline styles, because the
+game's check boxes are images with the caption baked in. Changes are saved to
+`game.conf`; the battery saver also sets `Application.targetFrameRate` right
+away. If anything is not found after a game update, the library writes the
+reason to `dmhook.log` and does nothing else.
+
 ## Smooth animation
 
 GE-Proton draws the game into a hidden window and copies each frame to the

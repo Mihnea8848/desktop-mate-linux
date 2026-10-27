@@ -58,7 +58,7 @@ supervise_ghost() {
         echo "starting ghost.exe via $PROTON (try $tries)"
         WINE_LAYERED_OVERLAY_ALPHA='' WINE_LAYERED_OVERLAY_SHAPE_INTERVAL='' \
         DXVK_FRAME_RATE='' VKD3D_FRAME_RATE='' WINEDEBUG=-all GHOST_SCALE="$XSCALE" \
-        GHOST_GAME_TRANSPARENT="${DM_GAME_TRANSPARENT:-1}" \
+        GHOST_GAME_TRANSPARENT="${DM_GAME_TRANSPARENT:-1}" GHOST_HOOK="${DM_HOOK:-1}" \
             python3 "$PROTON" run "$DIR/bin/ghost.exe" </dev/null &
         runner=$!
         seen=0 missing=0
@@ -118,16 +118,26 @@ main() {
     [ -f "$DIR/local.conf" ] && . "$DIR/local.conf"
     # shellcheck source=/dev/null
     [ -f "$CONF" ] && . "$CONF"
+    # written by the Linux section of the game's settings page
+    # shellcheck source=/dev/null
+    [ -f "${CONF%/*}/game.conf" ] && . "${CONF%/*}/game.conf"
 
     mkdir -p "$RUN/cmd"
     rm -f "$RUN"/cmd/* "$RUN/windows.tsv" "$RUN/cursor.txt"
     echo "launch $(date '+%F %T')" >"$LOG"
+    # Wine hides HOME from Windows programs; tells the hook where game.conf goes
+    echo "${CONF%/*}" >"$RUN/config-dir"
 
     XSCALE=$(kreadconfig6 --file kwinrc --group Xwayland --key Scale 2>/dev/null)
     XSCALE=${XSCALE:-1}
     env_summary
 
     python3 -I "$DIR/scripts/ensure-prefix.py" >>"$LOG" 2>&1
+    # real names of the game's renamed il2cpp exports, for dmhook.dll
+    rm -f "$RUN/il2cpp-map.txt"
+    [ -n "$STEAM_COMPAT_INSTALL_PATH" ] &&
+        python3 -I "$DIR/scripts/il2cpp-map.py" "$STEAM_COMPAT_INSTALL_PATH/UnityPlayer.dll" \
+            "$RUN/il2cpp-map.txt" >>"$LOG" 2>&1
     python3 -I "$DIR/scripts/sync-autostart.py" >>"$LOG" 2>&1
 
     # GE-Proton layered overlay patch: ARGB window, click-through shape from alpha

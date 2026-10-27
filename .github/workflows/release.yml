@@ -23,7 +23,7 @@ jobs:
         run: |
           name="desktop-mate-linux-${GITHUB_REF_NAME}"
           mkdir -p "dist/$name/bin"
-          cp -r bin/ghost.exe bin/ghost-bridged bin/tools "dist/$name/bin/"
+          cp -r bin/ghost.exe bin/ghost-bridged bin/dmhook.dll bin/tools "dist/$name/bin/"
           cp -r launch.sh install.sh kwin patches scripts tools local.conf.example README.md LICENSE "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
       - name: Publish

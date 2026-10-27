@@ -58,6 +58,10 @@ writes the foreground window and cursor position to `fg.txt`, and
 `wbtest.exe move|min "<title>"` moves or minimizes a copied window the way the
 game does. `tools/bench.sh <label>` measures FPS and CPU use.
 
+To see the game's UI tree, write an element name (for example
+`setting-page`) to `/dev/shm/ghost-bridge/dmhook.dump` while the game runs; the
+subtree with its style classes appears in `dmhook.log`.
+
 ## Pull requests
 
 - Fork the repository, create a branch, and open a pull request against `main`.

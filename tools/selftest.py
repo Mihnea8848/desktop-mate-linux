@@ -170,9 +170,13 @@ def frame_pacing(seconds=4):
         if digest != last:
             changes.append(time.perf_counter())
             last = digest
-    # reads that catch a frame half written give near-zero gaps; skip them
-    gaps = [b - a for a, b in zip(changes, changes[1:]) if b - a > 0.010]
-    return sum(1 for v in gaps if v > 0.025) / len(gaps) if gaps else None
+    # reads that catch a frame half written give near-zero gaps; skip them.
+    # A doubled frame is a gap of about twice the usual one (60 or 30 FPS).
+    gaps = sorted(b - a for a, b in zip(changes, changes[1:]) if b - a > 0.010)
+    if not gaps:
+        return None
+    usual = gaps[len(gaps) // 2]
+    return sum(1 for v in gaps if v > usual * 1.5) / len(gaps)
 
 
 def snapshot_rect(title):
@@ -197,6 +201,10 @@ def main():
     report("relay on the session bus", "org.ghostbridge" in sh("qdbus6").stdout)
     loaded = sh("qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.isScriptLoaded", "ghostbridge")
     report("KWin script loaded", loaded.stdout.strip() == "true")
+    hook_log = os.path.join(RUN, "dmhook.log")
+    hook = open(hook_log).read() if os.path.exists(hook_log) else ""
+    report("settings section in the game's menu", "settings section added" in hook,
+           hook.strip().splitlines()[-1] if hook.strip() else "no dmhook.log")
     ok, detail = animating()
     report("character animates", ok, detail)
     doubled = frame_pacing()

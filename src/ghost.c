@@ -16,6 +16,7 @@
  * Env: GHOST_NO_WRITEBACK=1 disables the command channel.
  *      GHOST_SCALE=<n> Xwayland scale; KWin rects are multiplied by it.
  *      GHOST_GAME_TRANSPARENT=1 keeps WS_EX_TRANSPARENT on the game window.
+ *      GHOST_HOOK=0 does not load dmhook.dll (settings section) into the game.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -377,6 +378,38 @@ static void keep_game_transparent(void)
     SetWindowLongW(game, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED);
 }
 
+/* loads dmhook.dll from this program's folder into the game */
+static void inject_hook(DWORD pid)
+{
+    WCHAR path[MAX_PATH];
+    DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
+    WCHAR *slash = wcsrchr(path, L'\\');
+    if (!n || !slash || slash - path + 12 >= MAX_PATH) return;
+    wcscpy(slash + 1, L"dmhook.dll");
+    HANDLE proc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
+                              PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (!proc) {
+        logf_("hook: cannot open the game process (%lu)", GetLastError());
+        return;
+    }
+    SIZE_T size = (wcslen(path) + 1) * sizeof(WCHAR);
+    void *mem = VirtualAllocEx(proc, NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    void *load = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryW");
+    HANDLE t = NULL;
+    if (mem && WriteProcessMemory(proc, mem, path, size, NULL))
+        t = CreateRemoteThread(proc, NULL, 0, (LPTHREAD_START_ROUTINE)load, mem, 0, NULL);
+    if (t) {
+        WaitForSingleObject(t, 10000);
+        DWORD module = 0;
+        GetExitCodeThread(t, &module);
+        logf_("hook: loaded dmhook.dll: %s", module ? "yes" : "no");
+        CloseHandle(t);
+    } else {
+        logf_("hook: injection failed (%lu)", GetLastError());
+    }
+    CloseHandle(proc);
+}
+
 /* Wine's cursor stops where the pointer left the last X11 window. Move it to
  * the KWin position unless X is delivering motion itself or a button is down
  * (a drag that X tracks). */
@@ -540,6 +573,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
                 game_proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
                 game_pid = pid;
                 logf_("tracking game pid %lu", (unsigned long)pid);
+                const char *hook = getenv("GHOST_HOOK");
+                if (!hook || strcmp(hook, "0")) inject_hook(pid);
             } else if (GetTickCount() - started > GAME_WAIT_MS) {
                 logf_("game window never appeared, exiting");
                 break;

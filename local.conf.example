@@ -21,5 +21,8 @@
 # Write Unity's own log to /dev/shm/ghost-bridge/unity.log (the game turns it off).
 #DM_UNITY_LOG=1
 
+# Do not add the Linux section to the game's settings page.
+#DM_HOOK=0
+
 # Start the game without the window bridge.
 #DM_NO_BRIDGE=1
