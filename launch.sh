@@ -145,6 +145,7 @@ main() {
     esac
 
     python3 -I "$DIR/scripts/ensure-prefix.py" >>"$LOG" 2>&1
+    python3 -I "$DIR/scripts/game-defaults.py" >>"$LOG" 2>&1
     # real names of the game's renamed il2cpp exports, for dmhook.dll
     rm -f "$RUN/il2cpp-map.txt"
     [ -n "$STEAM_COMPAT_INSTALL_PATH" ] &&
