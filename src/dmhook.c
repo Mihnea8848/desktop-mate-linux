@@ -28,6 +28,7 @@
 #define CONF_DIR  RUN_DIR "config-dir"
 #define TICK_MS   500
 #define WM_DMHOOK (WM_APP + 0x444d)
+#define DRAG_POLL 10  /* ms between mouse button checks */
 
 static FILE *g_log;
 static HMODULE g_ga;
@@ -441,9 +442,13 @@ static void save_conf(void)
     logf_("saved: fps30 %d bridge %d direct %d", g_conf[FPS30], g_conf[BRIDGE], g_conf[DIRECT]);
 }
 
+static int g_dragging, g_drag_fps;
+
+/* 60 FPS, 30 with the battery saver, the screen's refresh rate while the
+   character is dragged so she keeps up with the pointer */
 static void apply_fps(void)
 {
-    int fps = g_conf[FPS30] ? 30 : 60;
+    int fps = g_conf[FPS30] ? 30 : g_dragging ? g_drag_fps : 60;
     void *a[] = { &fps };
     invoke(method(ui.application, "set_targetFrameRate", 1), NULL, a);
 }
@@ -500,6 +505,11 @@ static WNDPROC g_prev_proc;
 
 static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (msg == WM_DMHOOK && wp) {
+        g_dragging = wp == 1;
+        if (g_section) apply_fps();
+        return 0;
+    }
     if (msg == WM_DMHOOK) {
         /* only from the top-level message loop: a nested loop inside the game's
            own code would run our managed calls in the middle of its */
@@ -531,12 +541,25 @@ static DWORD WINAPI worker(void *arg)
     if (!resolve_api() || !widen_caller_check((uint8_t *)il_class_from_name)) return 0;
     for (int i = 0; i < 600 && !il_domain_get(); ++i) Sleep(100);
 
+    DEVMODEW mode = { .dmSize = sizeof mode };
+    g_drag_fps = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 60
+               ? (int)mode.dmDisplayFrequency : 60;
     g_prev_proc = (WNDPROC)SetWindowLongPtrW(game, GWLP_WNDPROC, (LONG_PTR)wndproc);
-    logf_("hooked game window %p", (void *)game);
-    /* window messages run on the main thread, where UI Toolkit may be used */
-    while (IsWindow(game)) {
-        PostMessageW(game, WM_DMHOOK, 0, 0);
-        Sleep(TICK_MS);
+    logf_("hooked game window %p, %d FPS while dragging", (void *)game, g_drag_fps);
+    /* window messages run on the main thread, where UI Toolkit may be used.
+       Mouse buttons only reach the game when pressed on the character. */
+    int held = 0;
+    for (DWORD waited = 0; IsWindow(game); waited += DRAG_POLL) {
+        int now = GetAsyncKeyState(VK_LBUTTON) < 0;
+        if (now != held && g_drag_fps > 60) {
+            held = now;
+            PostMessageW(game, WM_DMHOOK, held ? 1 : 2, 0);
+        }
+        if (waited >= TICK_MS) {
+            PostMessageW(game, WM_DMHOOK, 0, 0);
+            waited = 0;
+        }
+        Sleep(DRAG_POLL);
     }
     return 0;
 }
