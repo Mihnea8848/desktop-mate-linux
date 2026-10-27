@@ -21,7 +21,7 @@ jobs:
       - name: Build
         run: ./build.sh
       - name: Lint shell scripts
-        run: shellcheck launch.sh build.sh tools/*.sh
+        run: shellcheck launch.sh build.sh install.sh tools/*.sh
       - name: Check Python
         run: python -m py_compile scripts/*.py tools/*.py
       - name: Check KWin script syntax

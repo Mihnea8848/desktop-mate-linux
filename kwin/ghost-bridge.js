@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // KWin side of the bridge. Sends the window list to ghost-bridged (Update)
-// and applies the commands ghost.exe sends back (Poll).
+// and the pointer position (Cursor), and applies the commands ghost.exe sends
+// back (Poll).
 // Snapshot line, bottom to top: id rank x y w h active kind(normal|dock) caption
 
 function lc(s) { return (s || "").toString().toLowerCase(); }
@@ -101,6 +102,18 @@ function hook(w) {
     if (w.hiddenChanged) w.hiddenChanged.connect(push);
     push();
 }
+
+// Xwayland only sees the pointer over X11 windows; send it at most every 33 ms
+var cursorTimer = new QTimer();
+cursorTimer.singleShot = true;
+cursorTimer.interval = 33;
+cursorTimer.timeout.connect(function () {
+    var p = workspace.cursorPos;
+    callDBus("org.ghostbridge", "/", "org.ghostbridge", "Cursor", Math.round(p.x), Math.round(p.y));
+});
+workspace.cursorPosChanged.connect(function () {
+    if (!cursorTimer.active) cursorTimer.start();
+});
 
 workspace.windowAdded.connect(hook);
 workspace.windowRemoved.connect(push);

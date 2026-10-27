@@ -31,16 +31,16 @@ Expect rough edges. Reports from other setups are welcome.
 - Sitting on the top edge of a window and moving with it
 - Falling down when that window is minimized, moved away or closed
 - Moving and minimizing real windows when the game does so
+- The cursor position, also over native Wayland apps
+- The tray icon and its menu (GE-Proton 11-11 and newer)
+- "Launch at startup" in the game's settings
 
 ### Known problems
 
-- The tray icon appears, but its menu does not open. The same entries are in
-  the character's right-click menu.
-- Wine only knows where the cursor is while it is over an X11 window. Over
-  native Wayland apps the game sees the last known position, so anything that
-  follows the cursor everywhere only works over X11 windows and the character.
+- The tray menu does not close when you click somewhere else, because those
+  clicks never reach Wine. It closes when another window is activated, or
+  after 8 seconds.
 - CPU use is high. See [Performance](#performance).
-- "Launch at startup" in the game's settings has no effect on Linux.
 - Only KDE Plasma is supported, because the window list comes from a KWin script.
 - Steam installed as a Flatpak is untested. `launch.sh` would run inside the
   Flatpak sandbox, where `qdbus6` is usually missing; in that case the game
@@ -82,24 +82,40 @@ or [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
    ./build.sh
    ```
 
-2. In Steam, open the properties of Desktop Mate. Under Compatibility, force
-   GE-Proton 11-7 or newer.
+2. Quit Steam completely (Steam menu, Exit) and run:
 
-3. Under General, set the launch options to the full path of `launch.sh`:
-
-   ```
-   /home/you/desktop-mate-linux/launch.sh %command%
+   ```sh
+   ./install.sh
    ```
 
-4. Start the game, quit it, and start it again. The first start creates the
-   Wine prefix, and the window settings this project needs are written to it
-   from the second start on.
+   It sets the game's launch options to this copy of `launch.sh`, selects the
+   newest GE-Proton 11-7 or newer from `compatibilitytools.d` as the game's
+   compatibility tool (a "Latest" build from ProtonPlus is preferred, since it
+   updates itself), and writes the window settings to the game's Wine prefix.
+   Steam's config files are backed up as `.bak` next to the originals.
+   `--tool NAME` picks a specific tool; `./install.sh --remove` removes the
+   launch options again.
+
+3. Start Steam and then Desktop Mate. If the game had never been started
+   before, start it, quit it and start it again: the first start creates the
+   Wine prefix, and the window settings are written to it on the second.
+
+To set it up by hand instead: in the game's properties in Steam, force
+GE-Proton 11-7 or newer under Compatibility, and under General set the launch
+options to the full path of `launch.sh`:
+
+```
+/home/you/desktop-mate-linux/launch.sh %command%
+```
+
+Then start the game twice as in step 3.
 
 ## Configuration
 
 `launch.sh` reads environment variables, either from the launch options
-(`DM_FPS=30 /home/you/desktop-mate-linux/launch.sh %command%`) or from a
-`local.conf` file next to it. `local.conf.example` lists them.
+(`DM_FPS=30 /home/you/desktop-mate-linux/launch.sh %command%`), from a
+`local.conf` file next to it, or from `~/.config/desktop-mate-linux/local.conf`,
+which is read last. `local.conf.example` lists them.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -132,6 +148,7 @@ copies the real desktop into Wine:
 
 ```
 KWin script  --(window list)-->  ghost-bridged  --(windows.tsv)-->  ghost.exe
+KWin script  --(cursor)------->  ghost-bridged  --(cursor.txt)--->  ghost.exe
 KWin script  <--(commands)-----  ghost-bridged  <--(cmd files)----  ghost.exe
 ```
 
@@ -148,6 +165,14 @@ KWin script  <--(commands)-----  ghost-bridged  <--(cmd files)----  ghost.exe
 The invisible windows have an empty window region and are also unmanaged, so
 they are never drawn and never receive input.
 
+Cursor. Xwayland only receives pointer motion while the pointer is over an X11
+window, so Wine's cursor position stops where the pointer left the character.
+The KWin script sends the real position (at most 30 times a second) and
+`ghost.exe` moves Wine's cursor there, unless X is already reporting motion or
+a mouse button is held. Without this the game thinks the cursor is still on the
+character, keeps its window from being click-through and does not attach to
+the window she sits on.
+
 Click-through flag. On Windows the game marks its window as click-through
 (`WS_EX_TRANSPARENT`) whenever the cursor is not over the character, and window
 lookups then see past it to the window under the character. GE-Proton 11-7 and
@@ -157,6 +182,11 @@ stands on a window without attaching to it. `ghost.exe` puts the flag back.
 Input still follows the pixels, so clicking the character works as before. `ghost.exe` also keeps the game
 as Wine's foreground window, because the game ignores its right-click menu
 otherwise, and it exits when the game exits.
+
+Launch at startup. The game stores this setting in the Windows registry
+(`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), which nothing reads
+on Linux. `scripts/sync-autostart.py` runs when the game starts and exits and
+creates or removes `~/.config/autostart/desktop-mate-linux.desktop` to match.
 
 ## Performance
 
@@ -209,13 +239,16 @@ python3 "/path/to/GE-Proton/proton" run "$PWD/bin/tools/enumtest.exe"
   the way the game does.
 
 `tools/report.sh` prints system details and the logs for a bug report.
+`tools/selftest.py` checks a running game end to end: the bridge, sitting on
+and following a window, a game-driven minimize and the tray menu. It moves the
+real pointer through `ydotool`, so leave the desktop alone while it runs.
 `tools/bench.sh <label>` measures the frame rate and the CPU use of the game,
 Xwayland, KWin and wineserver while the game runs.
 
 If the character renders on a black rectangle, the game is not running with a
 GE-Proton build that has the overlay patch. If she is blurry and the click
-areas are offset, the prefix setting from step 4 of the installation is
-missing.
+areas are offset, the prefix setting is missing: start the game once more,
+or run `./install.sh` again with Steam closed.
 
 If the title bars of all windows disappear while the game runs, a KWin window
 rule that matches the game (`steam_app_3301060`) was changed or reloaded. KWin
@@ -230,7 +263,6 @@ the game is running. `launch.log` lists each start.
 - Lower CPU use
 - Settings for this project inside the game's own menus
 - Support for other compositors (GNOME, Hyprland)
-- Packages, starting with the AUR
 
 ## Contributing
 
