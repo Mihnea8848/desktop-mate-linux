@@ -7,7 +7,6 @@
 # kdialog, qdbus6, spectacle. Run from the repository root:
 #   python3 tools/selftest.py
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -154,6 +153,28 @@ def animating():
     return changed > 500, f"{changed} px changed"
 
 
+def frame_pacing(seconds=4):
+    """Share of on-screen frame intervals that are doubled (two refreshes or more)."""
+    import hashlib
+    d = display.Display()
+    win = next((c for c in d.screen().root.query_tree().children
+                if c.get_wm_name() == "DesktopMate" and c.get_attributes().map_state == 2), None)
+    box = game_box()
+    if not win or not box:
+        return None
+    g = win.get_geometry()
+    x, y, w, h = box[0] - g.x, box[1] - g.y, box[2] - box[0], box[3] - box[1]
+    last, changes, start = None, [], time.perf_counter()
+    while time.perf_counter() - start < seconds:
+        digest = hashlib.blake2b(win.get_image(x, y, w, h, 2, 0xffffffff).data, digest_size=8).digest()
+        if digest != last:
+            changes.append(time.perf_counter())
+            last = digest
+    # reads that catch a frame half written give near-zero gaps; skip them
+    gaps = [b - a for a, b in zip(changes, changes[1:]) if b - a > 0.010]
+    return sum(1 for v in gaps if v > 0.025) / len(gaps) if gaps else None
+
+
 def snapshot_rect(title):
     for line in open(os.path.join(RUN, "windows.tsv"), encoding="utf-8"):
         f = line.rstrip("\n").split("\t")
@@ -163,15 +184,8 @@ def snapshot_rect(title):
 
 
 def wine_run(exe, *args):
-    proton = None
-    log = open(os.path.join(RUN, "launch.log"), encoding="utf-8", errors="replace").read()
-    m = re.search(r"^proton: (.+)$", log, re.M)
-    if m:
-        proton = m.group(1)
-    env = dict(ENV, STEAM_COMPAT_DATA_PATH=os.path.expanduser("~/.local/share/Steam/steamapps/compatdata/3301060"),
-               STEAM_COMPAT_CLIENT_INSTALL_PATH=os.path.expanduser("~/.local/share/Steam"), WINEDEBUG="-all")
-    subprocess.run(["python3", proton, "run", os.path.join(REPO, "bin", "tools", exe), *args],
-                   env=env, capture_output=True, timeout=90)
+    subprocess.run([os.path.join(REPO, "tools", "run-in-game.sh"), os.path.join(REPO, "bin", "tools", exe), *args],
+                   env=ENV, capture_output=True, timeout=90)
 
 
 def main():
@@ -185,6 +199,10 @@ def main():
     report("KWin script loaded", loaded.stdout.strip() == "true")
     ok, detail = animating()
     report("character animates", ok, detail)
+    doubled = frame_pacing()
+    report("animation reaches the screen at the full frame rate",
+           doubled is not None and doubled < 0.05,
+           f"{doubled:.0%} of frames shown twice; see tools/build-ge-proton.sh" if doubled is not None else "")
 
     dialog = subprocess.Popen(["kdialog", "--title", TITLE, "--msgbox", "selftest"], env=ENV)
     try:
@@ -263,7 +281,10 @@ def main():
         time.sleep(3)
         screenshot("moved")
         after = game_box()
-        moved = before and after and abs((after[0] - before[0]) - 200) < 60 and abs((after[1] - before[1]) - 150) < 60
+        # centres, since she may change pose while riding along
+        moved = before and after and \
+            abs((after[0] + after[2] - before[0] - before[2]) / 2 - 200) < 80 and \
+            abs((after[1] + after[3] - before[1] - before[3]) / 2 - 150) < 80
         report("character follows a moved window", bool(moved), f"{before} -> {after}")
 
         wine_run("wbtest.exe", "min", TITLE)

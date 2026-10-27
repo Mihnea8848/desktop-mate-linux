@@ -77,6 +77,27 @@ supervise_ghost() {
     done
 }
 
+# Any "proton run" without the game's Steam environment (a tool, protontricks)
+# deletes the prefix's s: drive the game runs from. The game then fails to read
+# its own files, treats that as tampering and unloads the character, which
+# looks like a frozen image. Put the link back when it disappears.
+keep_game_drive() {
+    link=$STEAM_COMPAT_DATA_PATH/pfx/dosdevices/s:
+    i=0
+    until game_running && [ -L "$link" ]; do
+        i=$((i + 1))
+        [ $i -gt 120 ] && return
+        sleep 1
+    done
+    target=$(readlink "$link")
+    while game_running; do
+        if [ ! -L "$link" ]; then
+            ln -s "$target" "$link" && log "s: drive was removed, restored"
+        fi
+        sleep 2
+    done
+}
+
 # shellcheck disable=SC2329 # called by the EXIT trap
 cleanup() {
     trap - EXIT INT TERM HUP
@@ -85,6 +106,7 @@ cleanup() {
         [ -n "$WPID" ] && kill "$WPID" 2>/dev/null
         [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
     fi
+    [ -n "$KPID" ] && kill "$KPID" 2>/dev/null
     python3 -I "$DIR/scripts/sync-autostart.py" >>"$LOG" 2>&1
     log "exit $(date '+%F %T')"
 }
@@ -111,6 +133,9 @@ main() {
     # GE-Proton layered overlay patch: ARGB window, click-through shape from alpha
     export WINE_LAYERED_OVERLAY_ALPHA=1
     export WINE_LAYERED_OVERLAY_SHAPE_INTERVAL="${DM_SHAPE_INTERVAL:-200}"
+    # builds from tools/build-ge-proton.sh: present straight into the window
+    # instead of copying each frame (stock GE-Proton ignores it)
+    export WINE_LAYERED_OVERLAY_DIRECT="${DM_DIRECT:-1}"
 
     # the game limits itself to 60 FPS; DXVK's limiter costs CPU, so only use
     # it for a lower cap
@@ -128,6 +153,12 @@ main() {
             set -- "$@" "$a"
         done
         log "using $DM_PROTON"
+    fi
+
+    # Unity's own log (the game turns it off in boot.config)
+    if [ -n "$DM_UNITY_LOG" ] && [ "$DM_UNITY_LOG" != 0 ]; then
+        set -- "$@" -logFile 'Z:\dev\shm\ghost-bridge\unity.log'
+        log "unity log: $RUN/unity.log"
     fi
 
     PROTON=''
@@ -149,9 +180,14 @@ main() {
         BRIDGE=''
     fi
 
-    DPID='' WPID=''
+    DPID='' WPID='' KPID=''
     trap cleanup EXIT
     trap 'exit 143' INT TERM HUP
+
+    if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
+        keep_game_drive &
+        KPID=$!
+    fi
 
     if [ -n "$BRIDGE" ]; then
         "$DIR/bin/ghost-bridged" >>"$LOG" 2>&1 &

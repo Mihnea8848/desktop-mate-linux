@@ -1,4 +1,5 @@
-# Copy to local.conf (sourced by launch.sh). All settings are optional.
+# Copy to ~/.config/desktop-mate-linux/local.conf or to local.conf next to
+# launch.sh. All settings are optional.
 
 # Frame cap below the game's own 60 FPS, for example 30 to save power.
 #DM_FPS=30
@@ -12,6 +13,13 @@
 # Keep the click-through flag on the game window (default 1). Needed with
 # GE-Proton 11-7 and newer, or the character cannot attach to windows.
 #DM_GAME_TRANSPARENT=0
+
+# With a GE-Proton from tools/build-ge-proton.sh: copy every frame through an
+# offscreen window like stock GE-Proton does (default 1, draw directly).
+#DM_DIRECT=0
+
+# Write Unity's own log to /dev/shm/ghost-bridge/unity.log (the game turns it off).
+#DM_UNITY_LOG=1
 
 # Start the game without the window bridge.
 #DM_NO_BRIDGE=1

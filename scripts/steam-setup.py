@@ -112,13 +112,14 @@ def tool_name(tool_dir):
 
 
 def pick_tool(steam):
-    """Newest GE-Proton 11-7+; a ProtonPlus "Latest" build wins a tie, it updates itself."""
+    """A build from tools/build-ge-proton.sh, else the newest GE-Proton 11-7+; a ProtonPlus
+    "Latest" build wins a tie, it updates itself."""
     best = None
     for d in glob.glob(os.path.join(steam, "compatibilitytools.d", "*")):
         v, name = ge_version(d), tool_name(d)
         if not v or not name or v < MIN_GE:
             continue
-        rank = (v, "latest" in name.lower())
+        rank = (name.endswith("-desktopmate"), v, "latest" in name.lower())
         if not best or rank > best[0]:
             best = (rank, name)
     return best[1] if best else None

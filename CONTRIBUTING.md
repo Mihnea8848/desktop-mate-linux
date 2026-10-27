@@ -43,7 +43,20 @@ The build writes everything to `bin/`, which is not tracked by git.
 
 `tools/xwin.py` shows the frame rate of the game window and can draw the
 click-through area over a screenshot. The programs in `bin/tools/` inspect the
-Win32 side; the README explains how to run them.
+Win32 side. Run them inside the game's Wine session while the game runs:
+
+```sh
+tools/run-in-game.sh bin/tools/enumtest.exe
+```
+
+Do not start them with a plain `proton run`: without the game's Steam
+environment Proton deletes the drive the game runs from, and the game unloads
+the character a little later.
+
+`enumtest.exe` writes the Win32 window list to `enum.txt`, `fgprobe.exe`
+writes the foreground window and cursor position to `fg.txt`, and
+`wbtest.exe move|min "<title>"` moves or minimizes a copied window the way the
+game does. `tools/bench.sh <label>` measures FPS and CPU use.
 
 ## Pull requests
 
