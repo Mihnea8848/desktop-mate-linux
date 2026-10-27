@@ -1,0 +1,34 @@
+#!/bin/sh
+# Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# desktop-mate-linux COMMAND
+#   setup [--tool NAME]  point Desktop Mate in Steam at this copy (Steam closed)
+#   remove               undo setup
+#   build-proton [DIR]   build the GE-Proton copy with smoother animation
+#   version              print the installed version
+
+DIR="$(dirname "$(readlink -f "$0")")"
+
+version() {
+    if [ -f "$DIR/VERSION" ]; then
+        cat "$DIR/VERSION"
+    elif command -v git >/dev/null && git -C "$DIR" describe --tags --always 2>/dev/null; then
+        :
+    else
+        echo unknown
+    fi
+}
+
+cmd=$1
+[ $# -gt 0 ] && shift
+case "$cmd" in
+    setup) exec "$DIR/install.sh" "$@" ;;
+    remove) exec "$DIR/install.sh" --remove ;;
+    build-proton) exec "$DIR/tools/build-ge-proton.sh" "$@" ;;
+    version) version ;;
+    *)
+        sed -n '5,9s/^# \{0,1\}//p' "$0"
+        [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = --help ] || exit 1
+        ;;
+esac

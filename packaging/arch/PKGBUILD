@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Maintainer: Mihnea Gîrbăcică <59713373+Mihnea8848@users.noreply.github.com>
+#
+# Built by .github/workflows/release.yml for the pacman repository on the
+# "repo" release; pkgver and sha256sums are filled in there.
+
+pkgname=desktop-mate-linux
+pkgver=0.3.1
+pkgrel=1
+pkgdesc='Run Desktop Mate on KDE Plasma Wayland with a transparent window and window interaction, through GE-Proton'
+arch=('x86_64')
+url='https://github.com/Mihnea8848/desktop-mate-linux'
+license=('GPL-3.0-or-later')
+depends=('python' 'systemd-libs' 'qt6-tools' 'kconfig' 'kwin' 'xorg-xwayland')
+optdepends=('git: tools/build-ge-proton.sh'
+            'python-xlib: tools/selftest.py and tools/xwin.py'
+            'python-pillow: tools/selftest.py'
+            'ydotool: tools/selftest.py'
+            'kdialog: tools/selftest.py'
+            'spectacle: tools/selftest.py')
+provides=('desktop-mate-linux-bin')
+conflicts=('desktop-mate-linux-bin')
+install=$pkgname.install
+# bin/ghost.exe and bin/dmhook.dll are Windows programs
+options=('!strip' '!debug')
+source=("$url/releases/download/v$pkgver/$pkgname-v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$pkgname-v$pkgver"
+    install -d "$pkgdir/opt/$pkgname"
+    cp -r --no-preserve=ownership bin kwin patches scripts tools launch.sh install.sh desktop-mate-linux \
+        VERSION local.conf.example "$pkgdir/opt/$pkgname/"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -d "$pkgdir/usr/bin"
+    ln -s "/opt/$pkgname/desktop-mate-linux" "$pkgdir/usr/bin/desktop-mate-linux"
+}

@@ -55,16 +55,44 @@ GE-Proton 11-7 or newer. Install GE-Proton with
 [ProtonPlus](https://github.com/Vysp3r/ProtonPlus) or
 [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
 
+### Arch Linux, CachyOS and other Arch-based systems
+
+The package comes from a signed pacman repository and updates with the rest
+of your system. Trust the signing key once:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Mihnea8848/desktop-mate-linux/main/packaging/keys/release-signing-key.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key F8C7376657A5D82B72F10B9515F891FB0894DEF1
+```
+
+Add the repository at the end of `/etc/pacman.conf`:
+
+```ini
+[desktop-mate-linux]
+Server = https://github.com/Mihnea8848/desktop-mate-linux/releases/download/repo
+```
+
+Then install it, quit Steam completely (Steam menu, Exit) and set it up:
+
+```sh
+sudo pacman -Syu desktop-mate-linux
+desktop-mate-linux setup
+```
+
+### Other distributions
+
 1. Download `desktop-mate-linux-<version>.tar.gz` from the
    [releases page](https://github.com/Mihnea8848/desktop-mate-linux/releases)
    and extract it somewhere it can stay, for example `~/desktop-mate-linux`.
-2. Quit Steam completely (Steam menu, Exit) and run `./install.sh` in that
-   folder. It points the game's launch options at `launch.sh` and picks your
-   newest GE-Proton.
-3. Start Steam and then Desktop Mate. If you had never started the game
-   before, start it, quit it and start it once more.
+2. Quit Steam completely and run `./desktop-mate-linux setup` in that folder.
+   It points the game's launch options at `launch.sh` and picks your newest
+   GE-Proton.
 
-To undo it, run `./install.sh --remove` with Steam closed.
+### Then
+
+Start Steam and then Desktop Mate. If you had never started the game before,
+start it, quit it and start it once more. To undo the setup, run
+`desktop-mate-linux remove` with Steam closed.
 
 Building from source instead is one command on Arch Linux:
 
@@ -73,9 +101,6 @@ sudo pacman -S --needed base-devel clang lld llvm mingw-w64-headers mingw-w64-cr
 git clone https://github.com/Mihnea8848/desktop-mate-linux.git
 cd desktop-mate-linux && ./build.sh
 ```
-
-There is also a PKGBUILD in `packaging/aur` that you can build with
-`makepkg -si`.
 
 ### Smoother animation (optional)
 
@@ -90,7 +115,7 @@ sudo pacman -S --needed git base-devel flex bison libx11 libxext libxcomposite w
 tools/build-ge-proton.sh
 ```
 
-Then restart Steam and run `./install.sh` again. I am working on getting this
+Then restart Steam and run `desktop-mate-linux setup` again. I am working on getting this
 fix into GE-Proton itself.
 
 ## Settings
@@ -120,7 +145,7 @@ Logs are in `/dev/shm/ghost-bridge/`: `launch.log` from the start script and
 - Black rectangle around her: the game is not running on GE-Proton 11-7 or
   newer.
 - She is blurry or clicks land in the wrong place: start the game once more,
-  or run `./install.sh` again with Steam closed.
+  or run `desktop-mate-linux setup` again with Steam closed.
 - She stops moving and the image freezes: something ran `proton run` in the
   game's prefix (protontricks, for example), which removes the drive the game
   runs from. `launch.sh` puts it back within two seconds, but if the game

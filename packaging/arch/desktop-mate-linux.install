@@ -2,11 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 post_install() {
-    echo 'Quit Steam, then run desktop-mate-linux-setup as your user to point'
+    echo 'Quit Steam, then run "desktop-mate-linux setup" as your user to point'
     echo 'Desktop Mate at /opt/desktop-mate-linux/launch.sh. Settings go in'
     echo '~/.config/desktop-mate-linux/local.conf.'
-}
-
-post_upgrade() {
-    :
 }
