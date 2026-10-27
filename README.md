@@ -53,23 +53,30 @@ Expect rough edges. Reports from other setups are welcome.
 - GE-Proton 11-7 or newer. Older GE-Proton versions work but run at about 33
   FPS. The overlay patch this relies on is not part of Valve's Proton or
   proton-cachyos.
-- Build tools: gcc, clang, lld, llvm, the MinGW-w64 headers and CRT, systemd
-  development files, Python 3, and `qdbus6` (or `qdbus-qt6`)
-
-On Arch Linux and derivatives:
-
-```sh
-sudo pacman -S --needed base-devel clang lld llvm mingw-w64-headers mingw-w64-crt qt6-tools python
-```
+- Python 3, `qdbus6` (or `qdbus-qt6`) and `kreadconfig6`. On Plasma 6 these are
+  usually installed already; on Arch Linux they come from `python`, `qt6-tools`
+  and `kconfig`.
 
 GE-Proton can be installed with [ProtonPlus](https://github.com/Vysp3r/ProtonPlus)
 or [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
 
 ## Installation
 
-1. Clone the repository and build the helpers:
+1. Get the files, either as a release or by building from source.
+
+   Release: download `desktop-mate-linux-<version>.tar.gz` from the
+   [releases page](https://github.com/Mihnea8848/desktop-mate-linux/releases)
+   and extract it:
 
    ```sh
+   tar -xzf desktop-mate-linux-v0.1.0.tar.gz
+   ```
+
+   From source: you also need gcc, clang, lld, llvm, the MinGW-w64 headers and
+   CRT, and the systemd development files. On Arch Linux:
+
+   ```sh
+   sudo pacman -S --needed base-devel clang lld llvm mingw-w64-headers mingw-w64-crt
    git clone https://github.com/Mihnea8848/desktop-mate-linux.git
    cd desktop-mate-linux
    ./build.sh
