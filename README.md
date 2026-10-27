@@ -1,282 +1,152 @@
-# desktop-mate-linux
+# Desktop Mate on Linux
 
-Scripts and small helper programs that make the Steam game
-[Desktop Mate](https://store.steampowered.com/app/3301060/Desktop_Mate/) usable
-on Linux with KDE Plasma on Wayland. The character is drawn with a transparent
-background, clicks pass through empty areas, and she can sit on and interact
-with your normal desktop windows.
+Run [Desktop Mate](https://store.steampowered.com/app/3301060/Desktop_Mate/),
+the desktop mascot from Steam, on Linux. She is drawn with a real transparent
+background, clicks go through to your apps, and she sits on your windows,
+rides along when you move them and falls when you minimize them. It works on
+KDE Plasma (Wayland) through GE-Proton, without touching the game files.
 
-Desktop Mate is a Windows game built with Unity. Under Proton it starts, but the
-background is black, the window covers the screen and the character cannot see
-any other window. This project works around those three problems without
-modifying the game files.
+On plain Proton the game shows a black box that covers the screen, and the
+character never notices a single window. This project fixes all of that.
 
-## Status
+## Why I made this
 
-Early and experimental. It runs every day on the author's machine, but it has
-only been tested on one setup:
+I made this out of frustration. Desktop Mate keeps moving further away from the
+people who use it: instead of making the app better for its users, the
+developers obfuscated the code to lock out mods and put their effort into new
+ways to make money from it. Linux was never supported, and the attempts I
+found never got past a black box or a heavy screen-streaming workaround.
 
-- CachyOS, KDE Plasma 6.8.1, Wayland session
-- NVIDIA RTX 4060 Laptop GPU, driver 615.78
-- GE-Proton 11-11
-- Desktop Mate 1.16.1dw
+People who bought characters for it deserve to use what they own, on the system
+they choose. This repository is for the Linux users.
 
-Expect rough edges. Reports from other setups are welcome.
-
-### What works
+## What works
 
 - Transparent background with real per-pixel alpha
-- Clicking through empty parts of the window to the apps below
-- The right-click menu, settings, dragging the character
-- Sitting on the top edge of a window and moving with it
-- Falling down when that window is minimized, moved away or closed
-- Moving and minimizing real windows when the game does so
-- The cursor position, also over native Wayland apps
-- The tray icon and its menu (GE-Proton 11-11 and newer)
-- "Launch at startup" in the game's settings
+- Clicking through empty space to the apps below
+- Right-click menu, settings, dragging her around
+- Sitting on the top edge of any window, following it when it moves, falling
+  when it is minimized or closed
+- Reacting to the cursor anywhere on the screen, also over native Wayland apps
+- Tray icon and its menu
+- "Launch at startup" from the game's settings
 
-### Known problems
+I run it every day on CachyOS, KDE Plasma 6.8.1 (Wayland), an NVIDIA RTX 4060
+and GE-Proton 11-11. Other setups are untested, so I would love to hear how it
+goes on yours, good or bad.
 
-- The tray menu does not close when you click somewhere else, because those
-  clicks never reach Wine. It closes when another window is activated, or
-  after 8 seconds.
-- CPU use is high. See [Performance](#performance).
-- Only KDE Plasma is supported, because the window list comes from a KWin script.
-- Steam installed as a Flatpak is untested. `launch.sh` would run inside the
-  Flatpak sandbox, where `qdbus6` is usually missing; in that case the game
-  starts without the window bridge and `launch.log` says so.
+## Known problems
 
-## Requirements
+- Only KDE Plasma is supported, because the window list comes from a KWin
+  script. Hyprland and sway could be added; see the roadmap.
+- The tray menu does not close when you click somewhere else. It closes when
+  you switch windows, or after 8 seconds.
+- CPU use is high: about one core on my laptop.
+- Flatpak Steam is untested.
 
-- Steam with Desktop Mate installed
-- KDE Plasma 6 on Wayland (Xwayland must be available)
-- GE-Proton 11-7 or newer. Older GE-Proton versions work but run at about 33
-  FPS. The overlay patch this relies on is not part of Valve's Proton or
-  proton-cachyos.
-- Python 3, `qdbus6` (or `qdbus-qt6`) and `kreadconfig6`. On Plasma 6 these are
-  usually installed already; on Arch Linux they come from `python`, `qt6-tools`
-  and `kconfig`.
+## Install
 
-GE-Proton can be installed with [ProtonPlus](https://github.com/Vysp3r/ProtonPlus)
-or [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
+You need Steam with Desktop Mate installed, KDE Plasma 6 on Wayland, and
+GE-Proton 11-7 or newer. Install GE-Proton with
+[ProtonPlus](https://github.com/Vysp3r/ProtonPlus) or
+[ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
 
-## Installation
-
-1. Get the files, either as a release or by building from source.
-
-   Release: download `desktop-mate-linux-<version>.tar.gz` from the
+1. Download `desktop-mate-linux-<version>.tar.gz` from the
    [releases page](https://github.com/Mihnea8848/desktop-mate-linux/releases)
-   and extract it:
+   and extract it somewhere it can stay, for example `~/desktop-mate-linux`.
+2. Quit Steam completely (Steam menu, Exit) and run `./install.sh` in that
+   folder. It points the game's launch options at `launch.sh` and picks your
+   newest GE-Proton.
+3. Start Steam and then Desktop Mate. If you had never started the game
+   before, start it, quit it and start it once more.
 
-   ```sh
-   tar -xzf desktop-mate-linux-v0.1.0.tar.gz
-   ```
+To undo it, run `./install.sh --remove` with Steam closed.
 
-   From source: you also need gcc, clang, lld, llvm, the MinGW-w64 headers and
-   CRT, and the systemd development files. On Arch Linux:
+Building from source instead is one command on Arch Linux:
 
-   ```sh
-   sudo pacman -S --needed base-devel clang lld llvm mingw-w64-headers mingw-w64-crt
-   git clone https://github.com/Mihnea8848/desktop-mate-linux.git
-   cd desktop-mate-linux
-   ./build.sh
-   ```
-
-2. Quit Steam completely (Steam menu, Exit) and run:
-
-   ```sh
-   ./install.sh
-   ```
-
-   It sets the game's launch options to this copy of `launch.sh`, selects the
-   newest GE-Proton 11-7 or newer from `compatibilitytools.d` as the game's
-   compatibility tool (a "Latest" build from ProtonPlus is preferred, since it
-   updates itself), and writes the window settings to the game's Wine prefix.
-   Steam's config files are backed up as `.bak` next to the originals.
-   `--tool NAME` picks a specific tool; `./install.sh --remove` removes the
-   launch options again.
-
-3. Start Steam and then Desktop Mate. If the game had never been started
-   before, start it, quit it and start it again: the first start creates the
-   Wine prefix, and the window settings are written to it on the second.
-
-To set it up by hand instead: in the game's properties in Steam, force
-GE-Proton 11-7 or newer under Compatibility, and under General set the launch
-options to the full path of `launch.sh`:
-
-```
-/home/you/desktop-mate-linux/launch.sh %command%
+```sh
+sudo pacman -S --needed base-devel clang lld llvm mingw-w64-headers mingw-w64-crt
+git clone https://github.com/Mihnea8848/desktop-mate-linux.git
+cd desktop-mate-linux && ./build.sh
 ```
 
-Then start the game twice as in step 3.
+There is also a PKGBUILD in `packaging/aur` that you can build with
+`makepkg -si`.
 
-## Configuration
+### Smoother animation (optional)
 
-`launch.sh` reads environment variables, either from the launch options
-(`DM_FPS=30 /home/you/desktop-mate-linux/launch.sh %command%`), from a
-`local.conf` file next to it, or from `~/.config/desktop-mate-linux/local.conf`,
-which is read last. `local.conf.example` lists them.
+Stock GE-Proton loses about a quarter of the frames on the way to the screen,
+so she moves at about 45 FPS. `tools/build-ge-proton.sh` rebuilds one library
+of your GE-Proton with my fix and installs it as a separate compatibility tool,
+for example `GE-Proton11-11-desktopmate`. With it all 60 frames arrive and the
+desktop uses less CPU.
 
-| Variable | Default | Meaning |
+```sh
+sudo pacman -S --needed git base-devel flex bison libx11 libxext libxcomposite wayland
+tools/build-ge-proton.sh
+```
+
+Then restart Steam and run `./install.sh` again. I am working on getting this
+fix into GE-Proton itself.
+
+## Settings
+
+Set these in the launch options (`DM_FPS=30 /path/to/launch.sh %command%`) or
+in `~/.config/desktop-mate-linux/local.conf`.
+
+| Variable | Default | What it does |
 | --- | --- | --- |
-| `DM_FPS` | | Frame rate cap below the game's own 60 FPS, for example 30 to save power. |
-| `DM_SHAPE_INTERVAL` | 200 | How often, in milliseconds, the click-through area is updated. |
-| `DM_PROTON` | | Path of a Proton build to use instead of the one chosen in Steam. |
-| `DM_GAME_TRANSPARENT` | 1 | Keep the click-through flag on the game window. See below. |
-| `DM_NO_BRIDGE` | | Set to 1 to run without the window bridge. |
+| `DM_FPS` | | Cap below 60 FPS, for example 30 to save battery |
+| `DM_PROTON` | | Use this Proton folder instead of the one chosen in Steam |
+| `DM_SHAPE_INTERVAL` | 200 | How often, in ms, the clickable area is updated |
+| `DM_NO_BRIDGE` | | Set to 1 to turn off window sitting |
 
-## How it works
-
-There are three separate problems.
-
-Transparency. The game asks Windows to extend the window frame over the whole
-window (`DwmExtendFrameIntoClientArea`), which Wine does not implement. GE-Proton
-has a patch that gives such windows a 32-bit visual with an alpha channel and
-updates an X11 input shape from the opaque pixels. `launch.sh` enables it with
-`WINE_LAYERED_OVERLAY_ALPHA=1`.
-
-Window size. The game makes its window 20% larger than the monitor so the
-character can walk past the screen edges. KWin treats it as a fullscreen window
-and shrinks it to the monitor size, which blurs the character and shifts every
-coordinate. The prefix gets `Managed=N` for `DesktopMate.exe`, so the window is
-not managed by KWin and keeps the size the game asked for. `ensure-prefix.py`
-writes that setting on every launch.
-
-Other windows. The game finds windows with Win32 calls such as `EnumWindows`
-and `GetWindowRect`. Under Wine these only return Wine windows. The bridge
-copies the real desktop into Wine:
-
-```
-KWin script  --(window list)-->  ghost-bridged  --(windows.tsv)-->  ghost.exe
-KWin script  --(cursor)------->  ghost-bridged  --(cursor.txt)--->  ghost.exe
-KWin script  <--(commands)-----  ghost-bridged  <--(cmd files)----  ghost.exe
-```
-
-- `kwin/ghost-bridge.js` runs inside KWin and sends the position, size, title
-  and stacking order of every normal window and visible panel.
-- `ghost-bridged` is a small D-Bus service that passes data between KWin and
-  Wine through files in `/dev/shm/ghost-bridge`.
-- `ghost.exe` runs in the game's Wine session and creates one invisible window
-  for each real window, with the same rectangle and title. Panels become
-  `Shell_TrayWnd` windows. When the game moves or minimizes one of these
-  windows, `ghost.exe` sends a command back and the KWin script applies it to
-  the real window.
-
-The invisible windows have an empty window region and are also unmanaged, so
-they are never drawn and never receive input.
-
-Cursor. Xwayland only receives pointer motion while the pointer is over an X11
-window, so Wine's cursor position stops where the pointer left the character.
-The KWin script sends the real position (at most 30 times a second) and
-`ghost.exe` moves Wine's cursor there, unless X is already reporting motion or
-a mouse button is held. Without this the game thinks the cursor is still on the
-character, keeps its window from being click-through and does not attach to
-the window she sits on.
-
-Click-through flag. On Windows the game marks its window as click-through
-(`WS_EX_TRANSPARENT`) whenever the cursor is not over the character, and window
-lookups then see past it to the window under the character. GE-Proton 11-7 and
-newer compute the click-through area from the pixels instead, and the flag no
-longer stays on the window. The game then only finds itself and the character
-stands on a window without attaching to it. `ghost.exe` puts the flag back.
-Input still follows the pixels, so clicking the character works as before. `ghost.exe` also keeps the game
-as Wine's foreground window, because the game ignores its right-click menu
-otherwise, and it exits when the game exits.
-
-Launch at startup. The game stores this setting in the Windows registry
-(`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), which nothing reads
-on Linux. `scripts/sync-autostart.py` runs when the game starts and exits and
-creates or removes `~/.config/autostart/desktop-mate-linux.desktop` to match.
-
-## Performance
-
-Measured with `tools/bench.sh` on the setup above, character idle on the
-desktop. CPU is in percent of one core.
-
-| Setup | FPS | Game | Xwayland | KWin |
-| --- | --- | --- | --- | --- |
-| GE-Proton 11-5 | 33 | 90% | 38% | |
-| GE-Proton 11-7, DXVK cap at 60, shape every 100 ms | 59 | 112% | 16% | 18% |
-| GE-Proton 11-7, defaults (no DXVK cap, shape every 200 ms) | 60 | 90% | 10% | 19% |
-| GE-Proton 11-7, `DM_FPS=30` | 30 | 75% | 15% | 16% |
-
-What we found:
-
-- The game limits itself to 60 FPS. A DXVK frame cap on top of that only adds
-  a busy thread, so `launch.sh` sets none unless `DM_FPS` asks for a lower rate.
-- The in-game graphics preset and anti-aliasing setting make no measurable
-  difference to CPU or GPU use. Ultra with SMAA looks best and costs the same
-  as Low.
-- Most of the remaining cost is the frame copy. The NVIDIA X11 Vulkan driver
-  cannot present a window with alpha, so GE-Proton copies every frame through
-  the CPU, and KWin then composites a 2304x1296 window.
-- The window bridge (KWin script, relay and `ghost.exe`) costs about 1 to 2%.
-- Running the game on Wine's native Wayland driver (`PROTON_ENABLE_WAYLAND=1`)
-  does not work yet: the window becomes a managed fullscreen window, the
-  character is not drawn, and CPU use goes up.
+`local.conf.example` lists a few more for troubleshooting.
 
 ## Troubleshooting
 
-Logs are written to `/dev/shm/ghost-bridge/`:
+Logs are in `/dev/shm/ghost-bridge/`: `launch.log` from the start script and
+`ghost.log` from the window bridge.
 
-- `launch.log` shows what `launch.sh` did and whether the bridge started.
-- `ghost.log` lists every window copied into Wine and every command sent back.
-- `windows.tsv` is the current window list from KWin.
+- Black rectangle around her: the game is not running on GE-Proton 11-7 or
+  newer.
+- She is blurry or clicks land in the wrong place: start the game once more,
+  or run `./install.sh` again with Steam closed.
+- She stops moving and the image freezes: something ran `proton run` in the
+  game's prefix (protontricks, for example), which removes the drive the game
+  runs from. `launch.sh` puts it back within two seconds, but if the game
+  noticed first, restart it.
+- Title bars of all windows disappear: a KWin window rule for the game was
+  changed while it ran. Quit the game and do not add KWin rules for it.
 
-`build.sh` also builds three test programs in `bin/tools/`. Run them inside
-the game's Wine session while the game is running:
+For a bug report, attach the output of `tools/report.sh`.
 
-```sh
-STEAM_COMPAT_DATA_PATH=~/.local/share/Steam/steamapps/compatdata/3301060 \
-STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.local/share/Steam \
-python3 "/path/to/GE-Proton/proton" run "$PWD/bin/tools/enumtest.exe"
-```
+## How it works
 
-- `enumtest.exe` writes all Win32 top-level windows to `enum.txt`.
-- `fgprobe.exe` writes the foreground window, mouse buttons and cursor
-  position to `fg.txt`.
-- `wbtest.exe move|min "<window title>"` moves or minimizes a copied window
-  the way the game does.
-
-`tools/report.sh` prints system details and the logs for a bug report.
-`tools/selftest.py` checks a running game end to end: the bridge, sitting on
-and following a window, a game-driven minimize and the tray menu. It moves the
-real pointer through `ydotool`, so leave the desktop alone while it runs.
-`tools/bench.sh <label>` measures the frame rate and the CPU use of the game,
-Xwayland, KWin and wineserver while the game runs.
-
-If the character renders on a black rectangle, the game is not running with a
-GE-Proton build that has the overlay patch. If she is blurry and the click
-areas are offset, the prefix setting is missing: start the game once more,
-or run `./install.sh` again with Steam closed.
-
-If the title bars of all windows disappear while the game runs, a KWin window
-rule that matches the game (`steam_app_3301060`) was changed or reloaded. KWin
-tries to move the unmanaged game window and stops drawing decorations. Quitting
-the game restores them. Do not add KWin rules for the game.
-
-`ghost.exe` is restarted automatically (up to three times) if it stops while
-the game is running. `launch.log` lists each start.
+A KWin script sends the real window list and cursor position to a small helper
+that runs inside the game's Wine session. The helper creates an invisible copy
+of each window there, so the game sees your desktop as if it were on Windows,
+and sends the game's moves and minimizes back to KWin. GE-Proton's overlay
+patch provides the transparency. The details, and everything I measured, are in
+[docs/how-it-works.md](docs/how-it-works.md).
 
 ## Roadmap
 
-- Lower CPU use
-- Settings for this project inside the game's own menus
-- Support for other compositors (GNOME, Hyprland)
+- Settings for this project inside the game's own menu (in progress)
+- Hyprland and sway support
+- The GE-Proton fixes merged upstream, so no custom build is needed
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for how to build, test and report problems.
+Bug reports, test results from other hardware and pull requests are all
+welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848).
+Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848). Free software under the GNU
+General Public License, version 3 or later: you can use, change and share it,
+and anything you distribute based on it must stay under the same license, with
+source code. See [LICENSE](LICENSE).
 
-This project is free software under the GNU General Public License, version 3
-or later. You can use, change and share it, but anything you distribute that is
-based on it must be released under the same license, with source code. See
-[LICENSE](LICENSE).
-
-Desktop Mate is developed by infiniteloop Co., Ltd. This project is not
-affiliated with or endorsed by them and does not contain any game files.
+Desktop Mate is made by infiniteloop Co., Ltd. This project is not affiliated
+with them and contains no game files.

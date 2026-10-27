@@ -27,7 +27,7 @@ sha256sums=('SKIP')
 package() {
     cd "$_name-v$pkgver"
     install -d "$pkgdir/opt/$_name"
-    cp -r --no-preserve=ownership bin kwin scripts tools launch.sh install.sh local.conf.example "$pkgdir/opt/$_name/"
+    cp -r --no-preserve=ownership bin kwin patches scripts tools launch.sh install.sh local.conf.example "$pkgdir/opt/$_name/"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$_name/README.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -d "$pkgdir/usr/bin"
