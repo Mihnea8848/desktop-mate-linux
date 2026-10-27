@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * dmhook.dll: loaded into DesktopMate.exe by ghost.exe. Adds a "Linux" section
- * to the game's settings page and saves it to game.conf for launch.sh.
+ * to the game's settings page and saves it to game.conf for launch.sh, and a
+ * per-character brightness slider to the character settings.
  *
  * The game renames its il2cpp API exports and crashes callers outside
  * GameAssembly.dll and UnityPlayer.dll. il2cpp-map.txt (scripts/il2cpp-map.py)
@@ -193,7 +194,7 @@ static void *field_obj(void *obj, const char *name)
 /* UI Toolkit */
 
 static struct {
-    void *element, *document, *label, *toggle, *application;
+    void *element, *document, *label, *toggle, *slider, *application, *prefs, *light, *object;
     void *find_objects, *root, *child_count, *element_at, *get_name, *set_name;
     void *add, *add_class, *get_parent, *get_style;
 } ui;
@@ -205,8 +206,13 @@ static int resolve_ui(void)
     ui.element = find_class("UnityEngine.UIElements", "VisualElement");
     ui.label = find_class("UnityEngine.UIElements", "Label");
     ui.toggle = find_class("UnityEngine.UIElements", "Toggle");
+    ui.slider = find_class("UnityEngine.UIElements", "Slider");
     ui.application = find_class("UnityEngine", "Application");
-    if (!object || !ui.document || !ui.element || !ui.label || !ui.toggle || !ui.application) return 0;
+    ui.prefs = find_class("UnityEngine", "PlayerPrefs");
+    ui.light = find_class("UnityEngine", "Light");
+    ui.object = object;
+    if (!object || !ui.document || !ui.element || !ui.label || !ui.toggle || !ui.slider || !ui.application ||
+        !ui.prefs || !ui.light) return 0;
     ui.find_objects = method(object, "FindObjectsByType", 2);
     ui.root = method(ui.document, "get_rootVisualElement", 0);
     ui.child_count = method(ui.element, "get_childCount", 0);
@@ -470,6 +476,157 @@ static void build_section(void *common)
     logf_("settings section added");
 }
 
+/* Brightness, per character: the game lights the character with one
+ * directional light, scaled here. Saved as "<character> <percent>" lines. */
+
+#define BRIGHT_MIN 25
+#define BRIGHT_MAX 150
+static char g_character[128];
+static int g_bright = 100;
+static void *g_bright_slider, *g_bright_caption, *g_bright_section;
+static struct { void *light; float base; } g_lights[8];
+static int g_nlights;
+
+static void bright_path(char *out, int size)
+{
+    conf_path(out, size);
+    char *slash = strrchr(out, '/');
+    if (slash) snprintf(slash + 1, size - (slash + 1 - out), "brightness.conf");
+}
+
+static int load_bright(const char *character)
+{
+    char path[512], id[128];
+    int pct, found = 100;
+    bright_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (!f) return found;
+    while (fscanf(f, "%127s %d", id, &pct) == 2)
+        if (!strcmp(id, character)) found = pct;
+    fclose(f);
+    return found < BRIGHT_MIN || found > BRIGHT_MAX ? 100 : found;
+}
+
+static void save_bright(const char *character, int value)
+{
+    char path[512], tmp[520], id[128], lines[64][160];
+    int pct, n = 0;
+    bright_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        while (n < 63 && fscanf(f, "%127s %d", id, &pct) == 2)
+            if (strcmp(id, character)) snprintf(lines[n++], sizeof lines[0], "%s %d", id, pct);
+        fclose(f);
+    }
+    snprintf(lines[n++], sizeof lines[0], "%s %d", character, value);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (!(f = fopen(tmp, "w"))) {
+        logf_("cannot write %s", tmp);
+        return;
+    }
+    for (int i = 0; i < n; ++i) fprintf(f, "%s\n", lines[i]);
+    fclose(f);
+    MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING);
+}
+
+/* the character in the first slot, for example "Release/miku" */
+static void current_character(char *out, int size)
+{
+    void *a[] = { il_string_new("CharacterSlot/0") };
+    to_ascii(invoke(method(ui.prefs, "GetString", 1), NULL, a), out, size);
+}
+
+static void apply_bright(int find)
+{
+    if (find) {
+        int none = 0;
+        void *args[] = { il_type_get_object(il_class_get_type(ui.light)), &none };
+        void *arr = invoke(ui.find_objects, NULL, args);
+        uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
+        for (uintptr_t i = 0; i < n; ++i) {
+            void *l = ((void **)((char *)arr + 0x20))[i];
+            int known = 0;
+            for (int j = 0; j < g_nlights; ++j) known |= g_lights[j].light == l;
+            if (known || g_nlights == 8) continue;
+            void *r = invoke(method(ui.light, "get_intensity", 0), l, NULL);
+            if (!r) continue;
+            g_lights[g_nlights].light = l;
+            g_lights[g_nlights].base = *(float *)il_object_unbox(r);
+            il_gchandle_new(l, 0);
+            g_nlights++;
+        }
+    }
+    for (int j = 0; j < g_nlights; ++j) {
+        float v = g_lights[j].base * g_bright / 100.0f;
+        void *a[] = { &v };
+        invoke(method(ui.light, "set_intensity", 1), g_lights[j].light, a);
+    }
+}
+
+static void show_bright(void)
+{
+    char text[32];
+    snprintf(text, sizeof text, "Brightness %d%%", g_bright);
+    void *a[] = { il_string_new(text) };
+    invoke(method(ui.label, "set_text", 1), g_bright_caption, a);
+    float v = (float)g_bright;
+    void *b[] = { &v };
+    invoke(method(ui.slider, "SetValueWithoutNotify", 1), g_bright_slider, b);
+}
+
+static void build_bright(void *individual)
+{
+    void *box = new_element(ui.element, NULL, "setting-section", "linux-brightness-section");
+    /* one caption with the value: the game's slider-row places its value label
+       over a centred caption */
+    g_bright_caption = new_element(ui.label, "Brightness", "setting-version-label", NULL);
+    add_child(box, g_bright_caption);
+    g_bright_slider = new_element(ui.slider, NULL, "unity-base-field--no-label menu-slider", "linux-brightness");
+    float lo = BRIGHT_MIN, hi = BRIGHT_MAX;
+    void *a[] = { &lo }, *b[] = { &hi };
+    invoke(method(ui.slider, "set_lowValue", 1), g_bright_slider, a);
+    invoke(method(ui.slider, "set_highValue", 1), g_bright_slider, b);
+    add_child(box, g_bright_slider);
+    add_child(box, new_element(ui.element, NULL, "setting-separator", NULL));
+    add_child(individual, box);
+    il_gchandle_new(box, 0);
+    il_gchandle_new(g_bright_slider, 0);
+    il_gchandle_new(g_bright_caption, 0);
+    g_bright_section = box;
+    show_bright();
+    logf_("brightness slider added");
+}
+
+static void tick_bright(void)
+{
+    static int ticks;
+    char character[128];
+    current_character(character, sizeof character);
+    if (character[0] && strcmp(character, g_character)) {
+        snprintf(g_character, sizeof g_character, "%s", character);
+        g_bright = load_bright(character);
+        logf_("character %s, brightness %d%%", character, g_bright);
+        if (g_bright_slider) show_bright();
+        apply_bright(1);
+    } else if (++ticks % 4 == 0) {
+        apply_bright(1);  /* picks up a light the game created since */
+    }
+    if (!g_bright_section || !invoke(ui.get_parent, g_bright_section, NULL)) {
+        void *individual = find_in_documents("individual-section");
+        if (individual) build_bright(individual);
+        return;
+    }
+    void *r = invoke(method(ui.slider, "get_value", 0), g_bright_slider, NULL);
+    if (!r) return;
+    int v = (int)(*(float *)il_object_unbox(r) + 0.5f);
+    if (v != g_bright && g_character[0]) {
+        g_bright = v;
+        show_bright();
+        apply_bright(0);
+        save_bright(g_character, v);
+    }
+}
+
 /* runs on the game's main thread */
 static void tick(void)
 {
@@ -484,6 +641,7 @@ static void tick(void)
     }
     if (ready < 0) return;
     dump_request();
+    tick_bright();
 
     /* the game builds every page at start; rebuild ours if it ever goes away */
     if (!g_section || !invoke(ui.get_parent, g_section, NULL)) {

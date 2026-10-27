@@ -33,6 +33,7 @@ they choose. This repository is for the Linux users.
 - A "Linux" section in the game's own settings page (Global Settings, at the
   bottom) with a battery saver and switches for window sitting and smooth
   animation
+- A brightness slider per character (Character Settings, at the bottom)
 
 I run it every day on CachyOS, KDE Plasma 6.8.1 (Wayland), an NVIDIA RTX 4060
 and GE-Proton 11-11. Other setups are untested, so I would love to hear how it
