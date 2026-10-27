@@ -98,7 +98,10 @@ section is built from Unity `Toggle` and `Label` elements with the game's own
 style classes; the check boxes are drawn with inline styles, because the
 game's check boxes are images with the caption baked in. Changes are saved to
 `game.conf`; the battery saver also sets `Application.targetFrameRate` right
-away. If anything is not found after a game update, the library writes the
+away. While the character is dragged (the left button is held; clicks only
+reach the game on the character), the library raises the frame rate to the
+screen's refresh rate so she keeps up with the pointer, and sets it back to 60
+on release. If anything is not found after a game update, the library writes the
 reason to `dmhook.log` and does nothing else.
 
 ## Smooth animation
