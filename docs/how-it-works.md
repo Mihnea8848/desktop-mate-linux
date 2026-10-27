@@ -135,6 +135,15 @@ percent of one core.
 | GE-Proton 11-11, defaults | 60 | 88% | 10% | 22% |
 | GE-Proton 11-11 from `tools/build-ge-proton.sh` | 60 | 88% | 3% | 19% |
 
+Unity job workers, measured later from `/proc` over 20 s for the whole game
+process, GE-Proton 11-11 from `tools/build-ge-proton.sh`:
+
+| Unity arguments | Game | FPS |
+| --- | --- | --- |
+| none (19 job workers on a 20-thread CPU) | 140% | 60 |
+| `-job-worker-count 4` | 104% | 60 |
+| `-job-worker-count 2` (default) | 95% | 60 |
+
 What I found:
 
 - The game limits itself to 60 FPS. A DXVK frame cap on top of that only adds
@@ -149,6 +158,9 @@ What I found:
   the 2304x1296 window is taller than the screen, so the fast shared-memory
   read fails and every sample goes over the X socket. The patched build reads
   the window's pixmap instead.
+- Unity starts one job worker thread per CPU thread. Under Wine the idle
+  workers spin, and 19 of them cost 0.6 of a core. `launch.sh` passes
+  `-job-worker-count 2`, which keeps 60 FPS with even frame pacing.
 - The window bridge (KWin script, relay and `ghost.exe`) costs about 1 to 2%.
 - Running the game on Wine's native Wayland driver (`PROTON_ENABLE_WAYLAND=1`)
   does not work yet: the window becomes a managed fullscreen window, the

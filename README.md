@@ -104,6 +104,7 @@ in `~/.config/desktop-mate-linux/local.conf`.
 | `DM_SHAPE_INTERVAL` | 200 | How often, in ms, the clickable area is updated |
 | `DM_NO_BRIDGE` | | Set to 1 to turn off window sitting |
 | `DM_HOOK` | 1 | Set to 0 to leave the game's settings page alone |
+| `DM_UNITY_ARGS` | `-job-worker-count 2` | Extra arguments for the game's Unity player |
 
 The Linux section in the game's settings saves to
 `~/.config/desktop-mate-linux/game.conf`, which is read after `local.conf`.
