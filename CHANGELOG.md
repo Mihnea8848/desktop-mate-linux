@@ -2,7 +2,10 @@
 
 Each section is also the text of the matching GitHub release.
 
-## Unreleased
+## v0.5.0
+
+Easier to install and keep up to date, and one place for this project's
+settings inside the game.
 
 ### Changed
 
