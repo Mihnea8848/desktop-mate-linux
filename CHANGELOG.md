@@ -6,6 +6,9 @@ Each section is also the text of the matching GitHub release.
 
 ### Changed
 
+- The first start sets the game's anti-aliasing to MSAA (HQ), once. The other
+  modes look poor under Proton; MSAA costs about 2 W and no frame rate. A mode
+  picked in the game afterwards is kept.
 - The GE-Proton patches follow the review on
   GloriousEggroll/proton-ge-custom#897: the click-through readback no longer
   retries the fast path on every sample after it failed once, and the
