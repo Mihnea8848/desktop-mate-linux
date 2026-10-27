@@ -2,6 +2,16 @@
 
 Each section is also the text of the matching GitHub release.
 
+## Unreleased
+
+### Changed
+
+- The GE-Proton patches follow the review on
+  GloriousEggroll/proton-ge-custom#897: the click-through readback no longer
+  retries the fast path on every sample after it failed once, and the
+  toplevel readback is only used with `WINE_LAYERED_OVERLAY_DIRECT=1`. Run
+  `desktop-mate-linux build-proton` again to pick them up.
+
 ## v0.5.0
 
 Easier to install and keep up to date, and one place for this project's
