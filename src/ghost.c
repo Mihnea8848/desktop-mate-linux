@@ -24,7 +24,9 @@
 #define CMD_DIR       "Z:\\dev\\shm\\ghost-bridge\\cmd\\"
 #define LOG_PATH      "Z:\\dev\\shm\\ghost-bridge\\ghost.log"
 #define MAX_GHOSTS    128
-#define POLL_MS       50
+#define BRIDGE_DIR    "Z:\\dev\\shm\\ghost-bridge"
+#define POLL_MS       50    /* while a mirror is on hold, or without change notifications */
+#define IDLE_MS       1000  /* otherwise: game and foreground checks */
 #define HOLD_MS       400   /* ignore snapshot geometry this long after the game moved a mirror */
 #define GAME_WAIT_MS  180000
 #define LOG_MAX       (1024 * 1024)
@@ -266,6 +268,14 @@ static void restack(HWND *norm, int nnorm, HWND *dock, int ndock)
     prev_ndock = ndock;
 }
 
+static int holding(void)
+{
+    DWORD now = GetTickCount();
+    for (int i = 0; i < g_count; ++i)
+        if ((LONG)(g_ghosts[i].hold_until - now) > 0) return 1;
+    return 0;
+}
+
 static void tick(void)
 {
     static char buf[256 * 1024], last[256 * 1024];
@@ -283,10 +293,7 @@ static void tick(void)
     buf[got] = 0;
 
     DWORD now = GetTickCount();
-    int holding = 0;
-    for (int i = 0; i < g_count; ++i)
-        if ((LONG)(g_ghosts[i].hold_until - now) > 0) holding = 1;
-    if (got == lastlen && !memcmp(buf, last, got) && !holding) return;
+    if (got == lastlen && !memcmp(buf, last, got) && !holding()) return;
     memcpy(last, buf, got);
     lastlen = got;
 
@@ -401,34 +408,54 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     wc.lpszClassName = L"Shell_SecondaryTrayWnd"; RegisterClassW(&wc);
 
     logf_("start pid=%lu writeback=%d scale=%.2f", (unsigned long)GetCurrentProcessId(), g_writeback, g_scale);
-    SetTimer(NULL, 1, POLL_MS, NULL);
+
+    /* wake on changes in the bridge dir instead of polling; fall back to
+     * polling if change notifications are not available */
+    HANDLE change = FindFirstChangeNotificationA(BRIDGE_DIR, FALSE,
+                                                 FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
+    if (change == INVALID_HANDLE_VALUE) {
+        change = NULL;
+        logf_("no change notification (%lu), polling every %d ms", GetLastError(), POLL_MS);
+    }
 
     /* exit with the game, otherwise Proton and Steam consider it still running */
     HANDLE game_proc = NULL;
     DWORD started = GetTickCount();
-    MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        if (msg.message == WM_TIMER && msg.hwnd == NULL) {
-            if (!game_proc) {
-                HWND game = FindWindowW(L"UnityWndClass", NULL);
-                DWORD pid = 0;
-                if (game) GetWindowThreadProcessId(game, &pid);
-                if (pid) {
-                    game_proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
-                    logf_("tracking game pid %lu", (unsigned long)pid);
-                } else if (GetTickCount() - started > GAME_WAIT_MS) {
-                    logf_("game window never appeared, exiting");
-                    break;
-                }
-            } else if (WaitForSingleObject(game_proc, 0) == WAIT_OBJECT_0) {
-                logf_("game exited, exiting");
+    for (;;) {
+        HANDLE handles[2];
+        DWORD n = 0;
+        if (change) handles[n++] = change;
+        if (game_proc) handles[n++] = game_proc;
+        DWORD timeout = (!change || holding()) ? POLL_MS : IDLE_MS;
+        DWORD r = MsgWaitForMultipleObjects(n, handles, FALSE, timeout, QS_ALLINPUT);
+        if (change && r == WAIT_OBJECT_0) FindNextChangeNotification(change);
+
+        MSG msg;
+        int quit = 0;
+        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) quit = 1;
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (quit) break;
+
+        if (!game_proc) {
+            HWND game = FindWindowW(L"UnityWndClass", NULL);
+            DWORD pid = 0;
+            if (game) GetWindowThreadProcessId(game, &pid);
+            if (pid) {
+                game_proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+                logf_("tracking game pid %lu", (unsigned long)pid);
+            } else if (GetTickCount() - started > GAME_WAIT_MS) {
+                logf_("game window never appeared, exiting");
                 break;
             }
-            tick();
-            if (game_proc) keep_game_foreground();
+        } else if (WaitForSingleObject(game_proc, 0) == WAIT_OBJECT_0) {
+            logf_("game exited, exiting");
+            break;
         }
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+        tick();
+        if (game_proc) keep_game_foreground();
     }
     for (int i = 0; i < g_count; ++i) DestroyWindow(g_ghosts[i].hwnd);
     return 0;

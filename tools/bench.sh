@@ -14,7 +14,7 @@ GAME=$(pid_of '^[A-Z]:.*\\DesktopMate\.exe')
 [ -n "$GAME" ] || { echo "game not running" >&2; exit 1; }
 XW=$(pgrep -x Xwayland | head -n 1)
 KW=$(pgrep -o -x kwin_wayland)
-WS=$(pid_of 'bin/wineserver')
+WS=$(pgrep -x wineserver | head -n 1)
 
 # second sample of top -d covers the whole interval
 cpu() {

@@ -96,8 +96,8 @@ or [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DM_FPS` | 60 | Frame rate cap. 0 removes the cap. |
-| `DM_SHAPE_INTERVAL` | 100 | How often, in milliseconds, the click-through area is updated. |
+| `DM_FPS` | | Frame rate cap below the game's own 60 FPS, for example 30 to save power. |
+| `DM_SHAPE_INTERVAL` | 200 | How often, in milliseconds, the click-through area is updated. |
 | `DM_PROTON` | | Path of a Proton build to use instead of the one chosen in Steam. |
 | `DM_NO_BRIDGE` | | Set to 1 to run without the window bridge. |
 
@@ -144,18 +144,30 @@ otherwise, and it exits when the game exits.
 
 ## Performance
 
-Measured on the setup above with the graphics preset on Ultra. CPU is in
-percent of one core.
+Measured with `tools/bench.sh` on the setup above, character idle on the
+desktop. CPU is in percent of one core.
 
-| Setup | FPS | Game | Xwayland |
-| --- | --- | --- | --- |
-| GE-Proton 11-5 | 33 | 90% | 38% |
-| GE-Proton 11-7, 60 FPS cap, 100 ms shape updates | 59 | 118% | 14% |
-| GE-Proton 11-7, 30 FPS cap, 100 ms shape updates | 30 | 80% | 15% |
+| Setup | FPS | Game | Xwayland | KWin |
+| --- | --- | --- | --- | --- |
+| GE-Proton 11-5 | 33 | 90% | 38% | |
+| GE-Proton 11-7, DXVK cap at 60, shape every 100 ms | 59 | 112% | 16% | 18% |
+| GE-Proton 11-7, defaults (no DXVK cap, shape every 200 ms) | 60 | 90% | 10% | 19% |
+| GE-Proton 11-7, `DM_FPS=30` | 30 | 75% | 15% | 16% |
 
-The NVIDIA X11 Vulkan driver cannot present a window with alpha, so GE-Proton
-copies every frame through the CPU. A lower graphics preset in the game or
-`DM_FPS=30` reduces the load.
+What we found:
+
+- The game limits itself to 60 FPS. A DXVK frame cap on top of that only adds
+  a busy thread, so `launch.sh` sets none unless `DM_FPS` asks for a lower rate.
+- The in-game graphics preset and anti-aliasing setting make no measurable
+  difference to CPU or GPU use. Ultra with SMAA looks best and costs the same
+  as Low.
+- Most of the remaining cost is the frame copy. The NVIDIA X11 Vulkan driver
+  cannot present a window with alpha, so GE-Proton copies every frame through
+  the CPU, and KWin then composites a 2304x1296 window.
+- The window bridge (KWin script, relay and `ghost.exe`) costs about 1 to 2%.
+- Running the game on Wine's native Wayland driver (`PROTON_ENABLE_WAYLAND=1`)
+  does not work yet: the window becomes a managed fullscreen window, the
+  character is not drawn, and CPU use goes up.
 
 ## Troubleshooting
 
