@@ -1,11 +1,12 @@
 #!/bin/sh
 # Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Steam launch options: /path/to/desktop-mate-linux/launch.sh %command%
 # Settings: environment variables or local.conf, see local.conf.example.
 
 DIR="$(dirname "$(readlink -f "$0")")"
+# shellcheck source=/dev/null
 [ -f "$DIR/local.conf" ] && . "$DIR/local.conf"
 
 RUN=/dev/shm/ghost-bridge
@@ -54,10 +55,12 @@ elif [ -z "$QDBUS" ] || [ -z "$PROTON" ]; then
 fi
 
 kwin_script() {
-    "$QDBUS" org.kde.KWin /Scripting org.kde.kwin.Scripting."$@"
+    method=$1
+    shift
+    "$QDBUS" org.kde.KWin /Scripting "org.kde.kwin.Scripting.$method" "$@"
 }
 
-DPID= WPID=
+DPID='' WPID=''
 if [ -n "$BRIDGE" ]; then
     "$DIR/bin/ghost-bridged" >>"$LOG" 2>&1 &
     DPID=$!
@@ -75,12 +78,12 @@ if [ -n "$BRIDGE" ]; then
             sleep 1
         done
         sleep 3
-        echo "starting ghost.exe via $PROTON" >>"$LOG"
-        WINE_LAYERED_OVERLAY_ALPHA= WINE_LAYERED_OVERLAY_SHAPE_INTERVAL= \
-        DXVK_FRAME_RATE= VKD3D_FRAME_RATE= WINEDEBUG=-all \
-            python3 "$PROTON" run "$DIR/bin/ghost.exe" >>"$LOG" 2>&1 </dev/null
-        echo "ghost.exe ended" >>"$LOG"
-    ) &
+        echo "starting ghost.exe via $PROTON"
+        WINE_LAYERED_OVERLAY_ALPHA='' WINE_LAYERED_OVERLAY_SHAPE_INTERVAL='' \
+        DXVK_FRAME_RATE='' VKD3D_FRAME_RATE='' WINEDEBUG=-all \
+            python3 "$PROTON" run "$DIR/bin/ghost.exe" </dev/null
+        echo "ghost.exe ended"
+    ) >>"$LOG" 2>&1 &
     WPID=$!
 fi
 

@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build tools
+        run: |
+          pacman -Syu --noconfirm --needed base-devel clang lld llvm \
+            mingw-w64-headers mingw-w64-crt systemd github-cli git
+      - uses: actions/checkout@v4
+      - name: Build
+        run: ./build.sh
+      - name: Package
+        run: |
+          name="desktop-mate-linux-${GITHUB_REF_NAME}"
+          mkdir -p "dist/$name"
+          cp -r bin/ghost.exe bin/ghost-bridged bin/tools launch.sh kwin scripts \
+            local.conf.example README.md LICENSE "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          gh release create "$GITHUB_REF_NAME" "dist/desktop-mate-linux-${GITHUB_REF_NAME}.tar.gz" \
+            --title "$GITHUB_REF_NAME" --generate-notes

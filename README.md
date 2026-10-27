@@ -177,6 +177,10 @@ python3 "/path/to/GE-Proton/proton" run "$PWD/bin/tools/enumtest.exe"
 - `wbtest.exe move|min "<window title>"` moves or minimizes a copied window
   the way the game does.
 
+`tools/report.sh` prints system details and the logs for a bug report.
+`tools/bench.sh <label>` measures the frame rate and the CPU use of the game,
+Xwayland, KWin and wineserver while the game runs.
+
 If the character renders on a black rectangle, the game is not running with a
 GE-Proton build that has the overlay patch. If she is blurry and the click
 areas are offset, the prefix setting from step 4 of the installation is
@@ -191,12 +195,17 @@ missing.
 
 ## Contributing
 
-Issues and pull requests are welcome. Please include your distribution,
-desktop, GPU and driver, GE-Proton version, and the logs listed above.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for how to build, test and report problems.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848).
+
+This project is free software under the GNU General Public License, version 3
+or later. You can use, change and share it, but anything you distribute that is
+based on it must be released under the same license, with source code. See
+[LICENSE](LICENSE).
 
 Desktop Mate is developed by infiniteloop Co., Ltd. This project is not
 affiliated with or endorsed by them and does not contain any game files.

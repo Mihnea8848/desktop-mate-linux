@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work or behaves differently than described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution
+      placeholder: CachyOS, Arch, Fedora 43, ...
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Plasma version and session
+      placeholder: Plasma 6.8.1, Wayland
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      placeholder: NVIDIA RTX 4060, 615.78 / AMD RX 7800, Mesa 26.0
+    validations:
+      required: true
+  - type: input
+    id: proton
+    attributes:
+      label: Proton build
+      placeholder: GE-Proton11-7
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output of tools/report.sh, or the files /dev/shm/ghost-bridge/launch.log and ghost.log.
+      render: text

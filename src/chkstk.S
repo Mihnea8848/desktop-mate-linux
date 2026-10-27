@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * ___chkstk_ms stack probe, normally from libgcc: touches every 4 KiB page
  * between rsp and rsp - rax.

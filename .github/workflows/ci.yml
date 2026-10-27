@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build tools
+        run: |
+          pacman -Syu --noconfirm --needed base-devel clang lld llvm \
+            mingw-w64-headers mingw-w64-crt systemd shellcheck python nodejs git
+      - uses: actions/checkout@v4
+      - name: Build
+        run: ./build.sh
+      - name: Lint shell scripts
+        run: shellcheck launch.sh build.sh tools/*.sh
+      - name: Check Python
+        run: python -m py_compile scripts/*.py tools/*.py
+      - name: Check KWin script syntax
+        run: node --check kwin/ghost-bridge.js

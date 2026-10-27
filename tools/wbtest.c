@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * wbtest.exe move|min "<title>": moves or minimizes a ghost.exe mirror from
  * another process, as the game does. Result in /dev/shm/ghost-bridge/wbtest.txt.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Sets Managed=N for DesktopMate.exe and ghost.exe in the game's Wine prefix.
 # Run before the game starts (wineserver stopped), so editing user.reg is safe.
