@@ -103,11 +103,12 @@ main() {
 
     # GE-Proton layered overlay patch: ARGB window, click-through shape from alpha
     export WINE_LAYERED_OVERLAY_ALPHA=1
-    export WINE_LAYERED_OVERLAY_SHAPE_INTERVAL="${DM_SHAPE_INTERVAL:-100}"
+    export WINE_LAYERED_OVERLAY_SHAPE_INTERVAL="${DM_SHAPE_INTERVAL:-200}"
 
-    FPS=${DM_FPS:-60}
-    if [ "$FPS" != 0 ]; then
-        export DXVK_FRAME_RATE="$FPS" VKD3D_FRAME_RATE="$FPS"
+    # the game limits itself to 60 FPS; DXVK's limiter costs CPU, so only use
+    # it for a lower cap
+    if [ -n "$DM_FPS" ] && [ "$DM_FPS" != 0 ]; then
+        export DXVK_FRAME_RATE="$DM_FPS" VKD3D_FRAME_RATE="$DM_FPS"
     fi
 
     if [ -n "$DM_PROTON" ] && [ -x "$DM_PROTON/proton" ]; then
