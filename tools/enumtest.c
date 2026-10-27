@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * enumtest.exe: writes every top-level Win32 window to /dev/shm/ghost-bridge/enum.txt.
  */

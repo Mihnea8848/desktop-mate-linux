@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Builds bin/ghost-bridged (Linux) and bin/ghost.exe plus the test tools (Windows).
 # Needs gcc, systemd-libs, clang, lld, llvm-ar, mingw-w64-headers, mingw-w64-crt.

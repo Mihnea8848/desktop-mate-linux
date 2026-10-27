@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * fgprobe.exe [fg]: writes Wine's foreground window, mouse button state and
  * cursor position to /dev/shm/ghost-bridge/fg.txt. "fg" makes the game

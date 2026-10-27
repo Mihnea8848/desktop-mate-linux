@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 //
 // KWin side of the bridge. Sends the window list to ghost-bridged (Update)
 // and applies the commands ghost.exe sends back (Poll).

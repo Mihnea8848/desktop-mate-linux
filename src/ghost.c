@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * ghost.exe: runs inside Desktop Mate's wineserver and mirrors the real KWin
  * windows as invisible Win32 windows, so the game's window scan finds them.
