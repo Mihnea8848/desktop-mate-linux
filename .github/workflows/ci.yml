@@ -21,8 +21,31 @@ jobs:
       - name: Build
         run: ./build.sh
       - name: Lint shell scripts
-        run: shellcheck launch.sh build.sh install.sh tools/*.sh
+        run: |
+          shellcheck launch.sh build.sh install.sh desktop-mate-linux tools/*.sh \
+            packaging/*.sh packaging/arch/*.sh
       - name: Check Python
         run: python -m py_compile scripts/*.py tools/*.py
       - name: Check KWin script syntax
         run: node --check kwin/ghost-bridge.js
+      # the release workflow's steps, with a throwaway key, so a broken
+      # release step fails here and not on a tag
+      - name: Release dry run
+        run: |
+          ./packaging/release-notes.sh "$(sed -n 's/^## \(v[0-9][^ ]*\).*/\1/p' CHANGELOG.md | head -n 1)" >/dev/null
+          ./packaging/make-dist.sh v0.0.0
+          export GNUPGHOME="$PWD/build/gnupg"
+          mkdir -p -m 700 "$GNUPGHOME"
+          gpg --batch --passphrase '' --quick-gen-key 'CI <ci@example.invalid>' ed25519 sign never
+          fpr=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')
+          gpg --batch --local-user "$fpr" --armor --detach-sign dist/SHA256SUMS
+          ./packaging/arch/build-repo.sh v0.0.0 "$fpr" build/repo
+          for f in db files; do test -f "build/repo/desktop-mate-linux.$f" && test ! -L "build/repo/desktop-mate-linux.$f"; done
+          gpg --armor --export "$fpr" >build/ci-key.asc
+          pacman-key --init
+          pacman-key --add build/ci-key.asc
+          pacman-key --lsign-key "$fpr"
+          printf '[desktop-mate-linux]\nServer = file://%s/build/repo\n' "$PWD" >>/etc/pacman.conf
+          # -dd: the package's runtime dependencies (KWin, Qt) are not needed to check it
+          pacman -Sydd --noconfirm desktop-mate-linux
+          test "$(desktop-mate-linux version)" = v0.0.0

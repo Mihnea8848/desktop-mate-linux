@@ -21,22 +21,16 @@ jobs:
           pacman -Syu --noconfirm --needed base-devel clang lld llvm \
             mingw-w64-headers mingw-w64-crt systemd github-cli git
       - uses: actions/checkout@v7
+      - name: Release notes
+        run: ./packaging/release-notes.sh "$GITHUB_REF_NAME" >notes.md
       - name: Build
         run: ./build.sh
-      - name: Package
-        run: |
-          name="desktop-mate-linux-${GITHUB_REF_NAME}"
-          mkdir -p "dist/$name/bin"
-          cp -r bin/ghost.exe bin/ghost-bridged bin/dmhook.dll bin/tools "dist/$name/bin/"
-          cp -r launch.sh install.sh desktop-mate-linux kwin patches scripts tools local.conf.example \
-            README.md LICENSE "dist/$name/"
-          echo "$GITHUB_REF_NAME" >"dist/$name/VERSION"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          (cd dist && sha256sum "$name.tar.gz" >SHA256SUMS)
-      - name: Import the signing key
+      - name: Tarball and checksums
+        run: ./packaging/make-dist.sh "$GITHUB_REF_NAME"
+      - name: Sign the checksums
         run: |
           if [ -z "$SIGNING_KEY" ]; then
-            echo "::notice::RELEASE_SIGNING_KEY is not set; checksums and the pacman repo stay unsigned and the repo is not updated"
+            echo "::notice::RELEASE_SIGNING_KEY is not set; checksums stay unsigned and the pacman repository is not updated"
             exit 0
           fi
           echo "$SIGNING_KEY" | gpg --batch --import
@@ -47,40 +41,18 @@ jobs:
           files="dist/desktop-mate-linux-${GITHUB_REF_NAME}.tar.gz dist/SHA256SUMS"
           [ -f dist/SHA256SUMS.asc ] && files="$files dist/SHA256SUMS.asc"
           # shellcheck disable=SC2086
-          gh release create "$GITHUB_REF_NAME" $files --title "$GITHUB_REF_NAME" --generate-notes
-      - name: Build the Arch package
-        run: |
-          useradd -m builder
-          install -d -o builder build
-          cp packaging/arch/PKGBUILD packaging/arch/desktop-mate-linux.install \
-            "dist/desktop-mate-linux-${GITHUB_REF_NAME}.tar.gz" build/
-          ver=${GITHUB_REF_NAME#v}
-          sum=$(sha256sum "build/desktop-mate-linux-${GITHUB_REF_NAME}.tar.gz" | cut -d' ' -f1)
-          sed -i "s/^pkgver=.*/pkgver=$ver/; s/^pkgrel=.*/pkgrel=1/; s/^sha256sums=.*/sha256sums=('$sum')/" build/PKGBUILD
-          chown -R builder build
-          su builder -c "cd build && makepkg --nodeps --noconfirm"
+          gh release create "$GITHUB_REF_NAME" $files --title "$GITHUB_REF_NAME" --notes-file notes.md
       - name: Update the pacman repository
         if: env.SIGNING_KEY != ''
         run: |
-          cd build
-          pkg=$(ls desktop-mate-linux-*.pkg.tar.zst)
-          gpg --batch --yes --local-user "$SIGNING_FPR" --detach-sign "$pkg"
           gh release view repo >/dev/null 2>&1 ||
             gh release create repo --prerelease --title "pacman repository" \
               --notes "Pacman repository for Arch-based systems. See the README for setup."
-          gh release download repo -p 'desktop-mate-linux.db.tar.gz' -p 'desktop-mate-linux.files.tar.gz' || true
+          mkdir -p build/repo
+          (cd build/repo && gh release download repo -p 'desktop-mate-linux.db.tar.gz' -p 'desktop-mate-linux.files.tar.gz') || true
           old=$(gh release view repo --json assets -q '.assets[].name' | grep '\.pkg\.tar\.zst' || true)
-          repo-add --sign --key "$SIGNING_FPR" --remove desktop-mate-linux.db.tar.gz "$pkg"
-          # pacman reads desktop-mate-linux.db; release assets cannot be symlinks
-          for f in db files; do
-            rm -f "desktop-mate-linux.$f" "desktop-mate-linux.$f.sig"
-            cp "desktop-mate-linux.$f.tar.gz" "desktop-mate-linux.$f"
-            cp "desktop-mate-linux.$f.tar.gz.sig" "desktop-mate-linux.$f.sig"
-          done
-          gh release upload repo --clobber "$pkg" "$pkg.sig" \
-            desktop-mate-linux.db desktop-mate-linux.db.sig desktop-mate-linux.files desktop-mate-linux.files.sig \
-            desktop-mate-linux.db.tar.gz desktop-mate-linux.db.tar.gz.sig \
-            desktop-mate-linux.files.tar.gz desktop-mate-linux.files.tar.gz.sig
+          pkg=$(./packaging/arch/build-repo.sh "$GITHUB_REF_NAME" "$SIGNING_FPR" build/repo | tail -n 1)
+          gh release upload repo --clobber build/repo/*
           for a in $old; do
             case "$a" in "$pkg"|"$pkg.sig") ;; *) gh release delete-asset repo "$a" --yes ;; esac
           done
