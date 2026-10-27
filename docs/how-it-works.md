@@ -74,7 +74,7 @@ when that fails it unloads the character and stops rendering, which looks like
 a frozen image. `launch.sh` watches the link and restores it, and
 `tools/run-in-game.sh` starts test programs with the right environment.
 
-## The Linux section in the game's settings
+## Linux Patch Settings in the game's settings
 
 `ghost.exe` loads `dmhook.dll` into the game process. The game is protected
 against mods, so a few things are needed before the library can do anything:
@@ -103,7 +103,10 @@ reach the game on the character), the library raises the frame rate to the
 screen's refresh rate so she keeps up with the pointer, and sets it back to 60
 on release.
 
-The brightness slider at the bottom of Character Settings scales the
+What this project adds to the game's settings is in a "Linux Patch
+Settings" section at the bottom of each tab: options for the current
+character under Character Settings, the rest under Global Settings. The
+brightness slider under Character Settings scales the
 intensity of the scene's directional light, which is what the characters'
 MToon shading reacts to, between 25% and 150%. The value is kept per
 character (the game's `CharacterSlot/0` player preference) in

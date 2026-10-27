@@ -2,6 +2,16 @@
 
 Each section is also the text of the matching GitHub release.
 
+## Unreleased
+
+### Changed
+
+- What this project adds to the game's settings is now in a "Linux Patch
+  Settings" section at the bottom of both tabs: the brightness slider for the
+  current character under Character Settings, the battery saver and the
+  switches under Global Settings.
+- The README lists the additions over the Windows version up front.
+
 ## v0.4.1
 
 The pacman repository is live with this release.
