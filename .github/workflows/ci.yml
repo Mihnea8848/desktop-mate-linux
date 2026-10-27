@@ -42,6 +42,7 @@ jobs:
           ./packaging/arch/build-repo.sh v0.0.0 "$fpr" build/repo
           for f in db files; do test -f "build/repo/desktop-mate-linux.$f" && test ! -L "build/repo/desktop-mate-linux.$f"; done
           gpg --armor --export "$fpr" >build/ci-key.asc
+          pacman-key --init
           pacman-key --add build/ci-key.asc
           pacman-key --lsign-key "$fpr"
           printf '[desktop-mate-linux]\nServer = file://%s/build/repo\n' "$PWD" >>/etc/pacman.conf
