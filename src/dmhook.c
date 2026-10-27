@@ -462,7 +462,7 @@ static void apply_fps(void)
 static void build_section(void *common)
 {
     void *box = new_element(ui.element, NULL, "setting-section", "linux-section");
-    add_child(box, new_element(ui.label, "Linux", "setting-version-label", NULL));
+    add_child(box, new_element(ui.label, "Linux Patch Settings", "setting-version-label", NULL));
     for (int i = 0; i < NSETTINGS; ++i) {
         char name[32];
         snprintf(name, sizeof name, "linux-toggle-%d", i);
@@ -565,7 +565,7 @@ static void apply_bright(int find)
 
 static void show_bright(void)
 {
-    char text[32];
+    char text[64];
     snprintf(text, sizeof text, "Brightness %d%%", g_bright);
     void *a[] = { il_string_new(text) };
     invoke(method(ui.label, "set_text", 1), g_bright_caption, a);
@@ -574,9 +574,11 @@ static void show_bright(void)
     invoke(method(ui.slider, "SetValueWithoutNotify", 1), g_bright_slider, b);
 }
 
+/* the Linux Patch Settings section of Character Settings */
 static void build_bright(void *individual)
 {
-    void *box = new_element(ui.element, NULL, "setting-section", "linux-brightness-section");
+    void *box = new_element(ui.element, NULL, "setting-section", "linux-character-section");
+    add_child(box, new_element(ui.label, "Linux Patch Settings", "setting-version-label", NULL));
     /* one caption with the value: the game's slider-row places its value label
        over a centred caption */
     g_bright_caption = new_element(ui.label, "Brightness", "setting-version-label", NULL);

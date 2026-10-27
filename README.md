@@ -9,6 +9,16 @@ KDE Plasma (Wayland) through GE-Proton, without touching the game files.
 On plain Proton the game shows a black box that covers the screen, and the
 character never notices a single window. This project fixes all of that.
 
+It also goes further than the Windows version. It adds things the official app
+does not have, right inside the game's own settings:
+
+- Brightness per character
+- A battery saver, and smoother dragging on high refresh rate screens
+- Switches for window sitting and smooth animation
+- **Custom characters (in development):** load your own VRM models, listed in
+  the character menu above the DLC, and pick which character's animations and
+  voice they use
+
 ## Why I made this
 
 I made this out of frustration. Desktop Mate keeps moving further away from the
@@ -30,10 +40,10 @@ they choose. This repository is for the Linux users.
 - Reacting to the cursor anywhere on the screen, also over native Wayland apps
 - Tray icon and its menu
 - "Launch at startup" from the game's settings
-- A "Linux" section in the game's own settings page (Global Settings, at the
-  bottom) with a battery saver and switches for window sitting and smooth
-  animation
-- A brightness slider per character (Character Settings, at the bottom)
+- A "Linux Patch Settings" section at the bottom of both tabs of the game's
+  own settings page: brightness for each character under Character Settings,
+  and a battery saver and switches for window sitting and smooth animation
+  under Global Settings
 
 I run it every day on CachyOS, KDE Plasma 6.8.1 (Wayland), an NVIDIA RTX 4060
 and GE-Proton 11-11. Other setups are untested, so I would love to hear how it
@@ -132,7 +142,7 @@ in `~/.config/desktop-mate-linux/local.conf`.
 | `DM_HOOK` | 1 | Set to 0 to leave the game's settings page alone |
 | `DM_UNITY_ARGS` | `-job-worker-count 2` | Extra arguments for the game's Unity player |
 
-The Linux section in the game's settings saves to
+The Linux Patch Settings section in the game's settings saves to
 `~/.config/desktop-mate-linux/game.conf`, which is read after `local.conf`.
 
 `local.conf.example` lists a few more for troubleshooting.
@@ -162,11 +172,13 @@ that runs inside the game's Wine session. The helper creates an invisible copy
 of each window there, so the game sees your desktop as if it were on Windows,
 and sends the game's moves and minimizes back to KWin. GE-Proton's overlay
 patch provides the transparency, and a small library loaded into the game adds
-the Linux section to its settings page. The details, and everything I measured, are in
-[docs/how-it-works.md](docs/how-it-works.md).
+the Linux Patch Settings section to its settings page. The details, and
+everything I measured, are in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Roadmap
 
+- Custom characters from your own VRM files, in a "Mods" category of the
+  character menu, using the animations and voice of a character you own
 - Hyprland and sway support
 - The GE-Proton fixes merged upstream, so no custom build is needed
 
