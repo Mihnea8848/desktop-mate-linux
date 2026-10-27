@@ -1,0 +1,13 @@
+# Copy to local.conf (sourced by launch.sh). All settings are optional.
+
+# Frame cap, 0 for none.
+#DM_FPS=60
+
+# Click-through shape sampling period in ms (GE-Proton 11-7 and newer).
+#DM_SHAPE_INTERVAL=100
+
+# Use another Proton build than the one selected in Steam.
+#DM_PROTON="$HOME/.local/share/Steam/compatibilitytools.d/Proton-GE Latest"
+
+# Start the game without the window bridge.
+#DM_NO_BRIDGE=1
