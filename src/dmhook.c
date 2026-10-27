@@ -1066,6 +1066,23 @@ static void vrm_attach(void *instance)
     }
     logf_("vrm: lilToon %p, %d materials moved", lil, changed);
 
+    /* shadows like hers: the game's characters do not receive real-time shadows,
+       so a lying VRM had its face darkened by its own hair */
+    if (nr) {
+        void *r0 = ((void **)((char *)rs + 0x20))[0];
+        void *recv = invoke(method(renderer, "get_receiveShadows", 0), r0, NULL);
+        void *cast = invoke(method(renderer, "get_shadowCastingMode", 0), r0, NULL);
+        uint8_t rv = recv ? *(uint8_t *)il_object_unbox(recv) : 0;
+        int cv = cast ? *(int32_t *)il_object_unbox(cast) : 1;
+        logf_("vrm: her shadows: receive %d, cast %d", rv, cv);
+        for (uintptr_t i = 0; i < nv; ++i) {
+            void *r = ((void **)((char *)vrs + 0x20))[i];
+            void *a[] = { &rv }, *b[] = { &cv };
+            invoke(method(renderer, "set_receiveShadows", 1), r, a);
+            invoke(method(renderer, "set_shadowCastingMode", 1), r, b);
+        }
+    }
+
     if (stage < 2) return;
     /* hide her meshes; her skeleton keeps running the game's animation, IK and colliders */
     uint8_t off = 0;
