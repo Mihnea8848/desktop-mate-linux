@@ -7,7 +7,9 @@
  * foreground, "desk" gives the foreground to Wine's desktop window, "steal"
  * makes a window of this process foreground and then exits, "wake" posts the
  * activation messages a focused window receives, "wfp X Y" reports which
- * window WindowFromPoint and ChildWindowFromPointEx return at X,Y.
+ * window WindowFromPoint and ChildWindowFromPointEx return at X,Y, "tray l|r"
+ * clicks Wine's tray icon window for the game, "closemenu" sends Escape to open
+ * popup menus.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -65,6 +67,24 @@ int main(int argc, char **argv)
         c[0] = t[0] = 0;
         if (d) { GetClassNameA(d, c, sizeof c); GetWindowTextA(d, t, sizeof t); }
         printf("ChildWindowFromPointEx(desktop)=%p cls='%s' title='%s'\n", (void *)d, c, t);
+    }
+    if (argc > 2 && !strcmp(argv[1], "tray")) {
+        HWND icon = FindWindowW(L"__wine_tray_icon", NULL);
+        UINT down = argv[2][0] == 'r' ? WM_RBUTTONDOWN : WM_LBUTTONDOWN;
+        UINT up = argv[2][0] == 'r' ? WM_RBUTTONUP : WM_LBUTTONUP;
+        printf("tray icon window %p\n", (void *)icon);
+        if (icon) {
+            PostMessageW(icon, down, 0, MAKELPARAM(5, 5));
+            PostMessageW(icon, up, 0, MAKELPARAM(5, 5));
+        }
+    }
+    if (argc > 1 && !strcmp(argv[1], "closemenu")) {
+        for (HWND m = FindWindowExW(NULL, NULL, L"#32768", NULL); m; m = FindWindowExW(NULL, m, L"#32768", NULL)) {
+            if (!IsWindowVisible(m)) continue;
+            printf("closing menu %p\n", (void *)m);
+            PostMessageW(m, WM_KEYDOWN, VK_ESCAPE, 0);
+            PostMessageW(m, WM_KEYUP, VK_ESCAPE, 0);
+        }
     }
     if (argc > 1 && !strcmp(argv[1], "wake") && game) {
         DWORD tid = GetWindowThreadProcessId(game, NULL);

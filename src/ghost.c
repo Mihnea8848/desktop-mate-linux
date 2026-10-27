@@ -10,6 +10,9 @@
  * The prefix runs ghost.exe unmanaged (Managed=N) so KWin never touches the
  * mirrors, and each mirror has an empty window region so it is never drawn.
  *
+ * The pointer position from KWin is fed to Wine while the pointer is over
+ * Wayland windows, where Xwayland gets no motion.
+ *
  * Env: GHOST_NO_WRITEBACK=1 disables the command channel.
  *      GHOST_SCALE=<n> Xwayland scale; KWin rects are multiplied by it.
  *      GHOST_GAME_TRANSPARENT=1 keeps WS_EX_TRANSPARENT on the game window.
@@ -23,6 +26,7 @@
 
 #define SNAPSHOT_PATH "Z:\\dev\\shm\\ghost-bridge\\windows.tsv"
 #define CMD_DIR       "Z:\\dev\\shm\\ghost-bridge\\cmd\\"
+#define CURSOR_PATH   "Z:\\dev\\shm\\ghost-bridge\\cursor.txt"
 #define LOG_PATH      "Z:\\dev\\shm\\ghost-bridge\\ghost.log"
 #define MAX_GHOSTS    128
 #define BRIDGE_DIR    "Z:\\dev\\shm\\ghost-bridge"
@@ -31,6 +35,8 @@
 #define HOLD_MS       400   /* ignore snapshot geometry this long after the game moved a mirror */
 #define GAME_WAIT_MS  180000
 #define LOG_MAX       (1024 * 1024)
+#define MENU_MAX_MS   8000  /* close a game popup menu left open this long */
+#define X_LIVE_MS     200   /* X moved the cursor this recently: it is over an X11 window */
 
 #ifndef EVENT_SYSTEM_FOREGROUND
 #define EVENT_SYSTEM_FOREGROUND     0x0003
@@ -61,6 +67,7 @@ static FILE    *g_log;
 static unsigned g_cmdseq;
 static double   g_scale = 1.0;
 static int      g_game_transparent;
+static DWORD    g_active_changed;  /* tick count of the last real active-window change */
 static long     g_logsize;
 
 static void logf_(const char *fmt, ...)
@@ -352,6 +359,7 @@ static void tick(void)
     if (active && active != last_active) {
         NotifyWinEvent(EVENT_SYSTEM_FOREGROUND, active, OBJID_WINDOW, CHILDID_SELF);
         last_active = active;
+        g_active_changed = GetTickCount();
     }
     g_self--;
 }
@@ -367,6 +375,72 @@ static void keep_game_transparent(void)
     LONG ex = GetWindowLongW(game, GWL_EXSTYLE);
     if ((ex & (WS_EX_TRANSPARENT | WS_EX_LAYERED)) == (WS_EX_TRANSPARENT | WS_EX_LAYERED)) return;
     SetWindowLongW(game, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+}
+
+/* Wine's cursor stops where the pointer left the last X11 window. Move it to
+ * the KWin position unless X is delivering motion itself or a button is down
+ * (a drag that X tracks). */
+static void follow_cursor(void)
+{
+    static POINT seen, sent;
+    static DWORD x_moved;
+    char buf[64];
+    DWORD got = 0;
+    HANDLE f = CreateFileA(CURSOR_PATH, GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    BOOL ok = ReadFile(f, buf, sizeof buf - 1, &got, NULL);
+    CloseHandle(f);
+    if (!ok) return;
+    buf[got] = 0;
+    POINT to;
+    if (sscanf(buf, "%ld %ld", &to.x, &to.y) != 2) return;
+    to.x = (LONG)(to.x * g_scale);
+    to.y = (LONG)(to.y * g_scale);
+
+    POINT cur;
+    DWORD now = GetTickCount();
+    if (!GetCursorPos(&cur)) return;
+    if ((cur.x != seen.x || cur.y != seen.y) && (cur.x != sent.x || cur.y != sent.y)) x_moved = now;
+    seen = cur;
+    if (now - x_moved < X_LIVE_MS) return;
+    if (GetAsyncKeyState(VK_LBUTTON) < 0 || GetAsyncKeyState(VK_RBUTTON) < 0) return;
+    if (to.x == cur.x && to.y == cur.y) return;
+
+    int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (vw <= 0 || vh <= 0) return;
+    INPUT in = { .type = INPUT_MOUSE };
+    in.mi.dx = (LONG)((((LONGLONG)(to.x - vx) << 16) + vw - 1) / vw);
+    in.mi.dy = (LONG)((((LONGLONG)(to.y - vy) << 16) + vh - 1) / vh);
+    in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    SendInput(1, &in, sizeof in);
+    sent = seen = to;
+}
+
+/* A popup menu (tray menu) closes on Windows when the user clicks elsewhere.
+ * Clicks on Wayland windows never reach Wine, so close the game's open menus
+ * when another real window gets activated, or after MENU_MAX_MS. */
+static void close_stale_menus(DWORD game_pid)
+{
+    static HWND open_menu;
+    static DWORD opened_at;
+    HWND menu = NULL;
+    for (HWND m = FindWindowExW(NULL, NULL, L"#32768", NULL); m; m = FindWindowExW(NULL, m, L"#32768", NULL)) {
+        DWORD pid = 0;
+        GetWindowThreadProcessId(m, &pid);
+        if (pid == game_pid && IsWindowVisible(m)) { menu = m; break; }
+    }
+    if (!menu) { open_menu = NULL; return; }
+    DWORD now = GetTickCount();
+    if (menu != open_menu) { open_menu = menu; opened_at = now; return; }
+    if ((LONG)(g_active_changed - opened_at) > 0 || now - opened_at > MENU_MAX_MS) {
+        PostMessageW(menu, WM_KEYDOWN, VK_ESCAPE, 0);
+        PostMessageW(menu, WM_KEYUP, VK_ESCAPE, 0);
+        logf_("closed game menu %p", (void *)menu);
+        open_menu = NULL;
+    }
 }
 
 /* KWin never activates the unmanaged game window, and the game ignores its
@@ -438,6 +512,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
 
     /* exit with the game, otherwise Proton and Steam consider it still running */
     HANDLE game_proc = NULL;
+    DWORD game_pid = 0;
     DWORD started = GetTickCount();
     for (;;) {
         HANDLE handles[2];
@@ -463,6 +538,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
             if (game) GetWindowThreadProcessId(game, &pid);
             if (pid) {
                 game_proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+                game_pid = pid;
                 logf_("tracking game pid %lu", (unsigned long)pid);
             } else if (GetTickCount() - started > GAME_WAIT_MS) {
                 logf_("game window never appeared, exiting");
@@ -475,6 +551,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
         tick();
         if (game_proc) keep_game_foreground();
         if (game_proc && g_game_transparent) keep_game_transparent();
+        if (game_proc) close_stale_menus(game_pid);
+        if (game_proc) follow_cursor();
     }
     for (int i = 0; i < g_count; ++i) DestroyWindow(g_ghosts[i].hwnd);
     return 0;

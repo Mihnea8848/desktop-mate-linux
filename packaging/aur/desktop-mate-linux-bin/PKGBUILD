@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Maintainer: Mihnea Gîrbăcică <59713373+Mihnea8848@users.noreply.github.com>
+
+pkgname=desktop-mate-linux-bin
+_name=desktop-mate-linux
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='Run Desktop Mate on KDE Plasma Wayland with a transparent window and window interaction, through GE-Proton'
+arch=('x86_64')
+url='https://github.com/Mihnea8848/desktop-mate-linux'
+license=('GPL-3.0-or-later')
+depends=('python' 'systemd-libs' 'qt6-tools' 'kconfig' 'kwin' 'xorg-xwayland')
+optdepends=('python-xlib: tools/selftest.py and tools/xwin.py'
+            'python-pillow: tools/selftest.py'
+            'ydotool: tools/selftest.py'
+            'kdialog: tools/selftest.py'
+            'spectacle: tools/selftest.py')
+provides=("$_name")
+conflicts=("$_name")
+install=$pkgname.install
+# bin/ghost.exe is a Windows program
+options=('!strip' '!debug')
+source=("$url/releases/download/v$pkgver/$_name-v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$_name-v$pkgver"
+    install -d "$pkgdir/opt/$_name"
+    cp -r --no-preserve=ownership bin kwin scripts tools launch.sh install.sh local.conf.example "$pkgdir/opt/$_name/"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$_name/README.md"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -d "$pkgdir/usr/bin"
+    ln -s "/opt/$_name/install.sh" "$pkgdir/usr/bin/$_name-setup"
+}

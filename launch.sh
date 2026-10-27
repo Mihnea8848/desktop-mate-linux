@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Steam launch options: /path/to/desktop-mate-linux/launch.sh %command%
-# Settings: environment variables or local.conf, see local.conf.example.
+# Settings: environment variables, local.conf next to this file or
+# ~/.config/desktop-mate-linux/local.conf (read last), see local.conf.example.
 #
 # Everything runs inside main(), so the shell has read the whole file before
 # the game starts and the file can be replaced while the game runs.
@@ -84,16 +85,20 @@ cleanup() {
         [ -n "$WPID" ] && kill "$WPID" 2>/dev/null
         [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
     fi
+    python3 -I "$DIR/scripts/sync-autostart.py" >>"$LOG" 2>&1
     log "exit $(date '+%F %T')"
 }
 
 main() {
     DIR="$(dirname "$(readlink -f "$0")")"
+    CONF=${XDG_CONFIG_HOME:-$HOME/.config}/desktop-mate-linux/local.conf
     # shellcheck source=/dev/null
     [ -f "$DIR/local.conf" ] && . "$DIR/local.conf"
+    # shellcheck source=/dev/null
+    [ -f "$CONF" ] && . "$CONF"
 
     mkdir -p "$RUN/cmd"
-    rm -f "$RUN"/cmd/* "$RUN/windows.tsv"
+    rm -f "$RUN"/cmd/* "$RUN/windows.tsv" "$RUN/cursor.txt"
     echo "launch $(date '+%F %T')" >"$LOG"
 
     XSCALE=$(kreadconfig6 --file kwinrc --group Xwayland --key Scale 2>/dev/null)
@@ -101,6 +106,7 @@ main() {
     env_summary
 
     python3 -I "$DIR/scripts/ensure-prefix.py" >>"$LOG" 2>&1
+    python3 -I "$DIR/scripts/sync-autostart.py" >>"$LOG" 2>&1
 
     # GE-Proton layered overlay patch: ARGB window, click-through shape from alpha
     export WINE_LAYERED_OVERLAY_ALPHA=1

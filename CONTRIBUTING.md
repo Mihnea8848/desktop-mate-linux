@@ -33,8 +33,11 @@ The build writes everything to `bin/`, which is not tracked by git.
 ## Testing a change
 
 1. Point the Steam launch options at your checkout's `launch.sh`.
-2. Start the game and check the basics: right-click menu, dragging the
-   character, sitting on a window, following a moved window.
+2. Start the game and run `python3 tools/selftest.py`. It drags the character
+   onto a test window, moves the window, minimizes it and opens the tray menu,
+   and needs `ydotoold`, `python-xlib`, `Pillow`, `kdialog` and `spectacle`.
+   It moves the real pointer, so do not use the desktop while it runs. Also
+   check the right-click menu by hand.
 3. For changes that may affect performance, run `tools/bench.sh <label>` before
    and after with the game idle, and put both rows in the pull request.
 
@@ -48,6 +51,13 @@ Win32 side; the README explains how to run them.
 - CI builds the project and runs shellcheck and syntax checks. It must pass.
 - Pull requests are merged with squash, so the branch history does not matter.
 - Keep one topic per pull request.
+
+## Releases and the Arch package
+
+Pushing a `v*` tag builds the release tarball. `packaging/aur/desktop-mate-linux-bin`
+has a PKGBUILD that installs that tarball to `/opt/desktop-mate-linux`. It is
+not on the AUR; build it with `makepkg -si` in that directory. After a release,
+set `pkgver`, reset `pkgrel` to 1 and run `updpkgsums`.
 
 ## Code style
 

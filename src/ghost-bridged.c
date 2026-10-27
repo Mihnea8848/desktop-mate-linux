@@ -6,6 +6,7 @@
  *
  *   Update(s)  KWin window snapshot, written atomically to windows.tsv
  *   Poll() s   long poll; returns queued commands from the cmd/ files, or "" after 20 s
+ *   Cursor(ii) KWin pointer position, written atomically to cursor.txt
  *   Diag(s)    writes s to diag.txt (debug scripts)
  */
 #define _GNU_SOURCE
@@ -24,6 +25,7 @@
 #define CMD_DIR      DIR_PATH "/cmd"
 #define OUT_PATH     DIR_PATH "/windows.tsv"
 #define TMP_PATH     DIR_PATH "/windows.tsv.tmp"
+#define CURSOR_PATH  DIR_PATH "/cursor.txt"
 #define POLL_TIMEOUT (20ULL * 1000000ULL)
 
 static sd_event        *g_event;
@@ -120,6 +122,18 @@ static int method_update(sd_bus_message *m, void *ud, sd_bus_error *err)
     return sd_bus_reply_method_return(m, "");
 }
 
+static int method_cursor(sd_bus_message *m, void *ud, sd_bus_error *err)
+{
+    (void)ud; (void)err;
+    int32_t x, y;
+    int r = sd_bus_message_read(m, "ii", &x, &y);
+    if (r < 0) return r;
+    char s[32];
+    snprintf(s, sizeof s, "%d %d", x, y);
+    if (write_file(CURSOR_PATH ".tmp", s) == 0) rename(CURSOR_PATH ".tmp", CURSOR_PATH);
+    return sd_bus_reply_method_return(m, "");
+}
+
 static int method_diag(sd_bus_message *m, void *ud, sd_bus_error *err)
 {
     (void)ud; (void)err;
@@ -152,6 +166,7 @@ static int method_poll(sd_bus_message *m, void *ud, sd_bus_error *err)
 static const sd_bus_vtable vtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_METHOD("Update", "s", "",  method_update, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("Cursor", "ii", "", method_cursor, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("Diag",   "s", "",  method_diag,   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("Poll",   "",  "s", method_poll,   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END
