@@ -71,10 +71,11 @@ subtree with its style classes appears in `dmhook.log`.
 
 ## Releases and the Arch package
 
-Pushing a `v*` tag builds the release tarball. `packaging/aur/desktop-mate-linux-bin`
-has a PKGBUILD that installs that tarball to `/opt/desktop-mate-linux`. It is
-not on the AUR; build it with `makepkg -si` in that directory. After a release,
-set `pkgver`, reset `pkgrel` to 1 and run `updpkgsums`.
+Pushing a `v*` tag builds the release tarball, signs `SHA256SUMS`, builds the
+package from `packaging/arch/PKGBUILD` and adds it to the pacman repository on
+the `repo` release. The signing key lives in the repository's Actions secrets;
+`tools/make-release-key.sh` creates a new one if it ever has to be replaced
+(users then trust the new `packaging/keys/release-signing-key.asc`).
 
 ## Code style
 
