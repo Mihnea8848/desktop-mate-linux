@@ -28,5 +28,8 @@
 # Do not add the Linux section to the game's settings page.
 #DM_HOOK=0
 
+# Installs from get.sh look for a new release once a day; off stops that.
+#DM_UPDATE=off
+
 # Start the game without the window bridge.
 #DM_NO_BRIDGE=1

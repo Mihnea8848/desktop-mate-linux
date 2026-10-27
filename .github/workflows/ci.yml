@@ -22,7 +22,7 @@ jobs:
         run: ./build.sh
       - name: Lint shell scripts
         run: |
-          shellcheck launch.sh build.sh install.sh desktop-mate-linux tools/*.sh \
+          shellcheck launch.sh build.sh install.sh get.sh desktop-mate-linux tools/*.sh \
             packaging/*.sh packaging/arch/*.sh
       - name: Check Python
         run: python -m py_compile scripts/*.py tools/*.py
@@ -49,3 +49,11 @@ jobs:
           # -dd: the package's runtime dependencies (KWin, Qt) are not needed to check it
           pacman -Sydd --noconfirm desktop-mate-linux
           test "$(desktop-mate-linux version)" = v0.0.0
+          # get.sh: the embedded key is the release key, and it installs and
+          # verifies the test release
+          sed -n '/BEGIN PGP PUBLIC KEY/,/END PGP PUBLIC KEY/p' get.sh | diff - packaging/keys/release-signing-key.asc
+          mkdir -p build/release/v0.0.0
+          cp dist/desktop-mate-linux-v0.0.0.tar.gz dist/SHA256SUMS dist/SHA256SUMS.asc build/release/v0.0.0/
+          HOME="$PWD/build/home" DML_BASE="file://$PWD/build/release" DML_TAG=v0.0.0 \
+            DML_KEY=build/ci-key.asc sh get.sh --update
+          test "$(build/home/.local/bin/desktop-mate-linux version)" = v0.0.0

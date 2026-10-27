@@ -12,6 +12,19 @@ Each section is also the text of the matching GitHub release.
   switches under Global Settings.
 - The README lists the additions over the Windows version up front.
 
+### Added
+
+- One-command install for any distribution:
+  `curl -fsSL https://raw.githubusercontent.com/Mihnea8848/desktop-mate-linux/main/get.sh | sh`.
+  It verifies the release signature, installs to
+  `~/.local/share/desktop-mate-linux` without root and runs the setup.
+- Installs made that way update themselves: at most once a day, when the
+  game starts, a newer signed release is installed for the next start and the
+  previous version is kept. `DM_UPDATE=off` turns it off. Package installs
+  are updated by the package manager instead.
+- `desktop-mate-linux update` and `desktop-mate-linux uninstall`.
+- CI installs the test release with `get.sh` on every pull request.
+
 ## v0.4.1
 
 The pacman repository is live with this release.

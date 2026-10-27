@@ -91,12 +91,24 @@ desktop-mate-linux setup
 
 ### Other distributions
 
-1. Download `desktop-mate-linux-<version>.tar.gz` from the
-   [releases page](https://github.com/Mihnea8848/desktop-mate-linux/releases)
-   and extract it somewhere it can stay, for example `~/desktop-mate-linux`.
-2. Quit Steam completely and run `./desktop-mate-linux setup` in that folder.
-   It points the game's launch options at `launch.sh` and picks your newest
-   GE-Proton.
+Quit Steam completely (Steam menu, Exit) and run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Mihnea8848/desktop-mate-linux/main/get.sh | sh
+```
+
+It downloads the latest release, checks its signature, installs it to
+`~/.local/share/desktop-mate-linux`, points the game's launch options at it
+and picks your newest GE-Proton. It needs no root. From then on it updates
+itself: once a day, when the game starts, it looks for a new release and
+installs it for the next start, keeping the previous version. Set
+`DM_UPDATE=off` to stop that, or run `desktop-mate-linux update` by hand.
+`desktop-mate-linux uninstall` removes it again.
+
+You can also download a tarball from the
+[releases page](https://github.com/Mihnea8848/desktop-mate-linux/releases),
+extract it somewhere it can stay and run `./desktop-mate-linux setup` in that
+folder.
 
 ### Then
 
@@ -140,6 +152,7 @@ in `~/.config/desktop-mate-linux/local.conf`.
 | `DM_SHAPE_INTERVAL` | 200 | How often, in ms, the clickable area is updated |
 | `DM_NO_BRIDGE` | | Set to 1 to turn off window sitting |
 | `DM_HOOK` | 1 | Set to 0 to leave the game's settings page alone |
+| `DM_UPDATE` | on | Set to `off` to stop installs from `get.sh` updating themselves |
 | `DM_UNITY_ARGS` | `-job-worker-count 2` | Extra arguments for the game's Unity player |
 
 The Linux Patch Settings section in the game's settings saves to

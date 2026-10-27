@@ -35,7 +35,14 @@ if [ ! -x "$DIR/bin/ghost-bridged" ] || [ ! -f "$DIR/bin/ghost.exe" ]; then
     fi
 fi
 
-out=$(python3 -I "$DIR/scripts/steam-setup.py" --steam "$STEAM" --launch "$DIR/launch.sh" "$@") || exit 1
+# installs from get.sh keep each version in versions/<tag>; Steam gets the
+# "current" link, so updates never need setup again
+LAUNCH=$DIR/launch.sh
+case "$DIR" in
+    */desktop-mate-linux/versions/*) LAUNCH=${DIR%/versions/*}/current/launch.sh ;;
+esac
+
+out=$(python3 -I "$DIR/scripts/steam-setup.py" --steam "$STEAM" --launch "$LAUNCH" "$@") || exit 1
 echo "$out"
 prefix=$(echo "$out" | sed -n 's/^prefix: //p')
 
