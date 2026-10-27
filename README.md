@@ -160,6 +160,11 @@ The Linux Patch Settings section in the game's settings saves to
 
 `local.conf.example` lists a few more for troubleshooting.
 
+The first start also sets the game's anti-aliasing to **MSAA (HQ)**. In my
+testing the other anti-aliasing modes look poor under Proton, and MSAA costs
+almost nothing (about 2 W and no frame rate on my laptop). This happens once;
+if you pick another mode in the game's settings afterwards, it stays.
+
 ## Troubleshooting
 
 Logs are in `/dev/shm/ghost-bridge/`: `launch.log` from the start script and
