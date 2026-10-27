@@ -12,6 +12,7 @@
  *
  * Env: GHOST_NO_WRITEBACK=1 disables the command channel.
  *      GHOST_SCALE=<n> Xwayland scale; KWin rects are multiplied by it.
+ *      GHOST_GAME_TRANSPARENT=1 keeps WS_EX_TRANSPARENT on the game window.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -59,6 +60,7 @@ static DWORD    g_style, g_exstyle;
 static FILE    *g_log;
 static unsigned g_cmdseq;
 static double   g_scale = 1.0;
+static int      g_game_transparent;
 static long     g_logsize;
 
 static void logf_(const char *fmt, ...)
@@ -354,6 +356,19 @@ static void tick(void)
     g_self--;
 }
 
+/* Windows skips layered + WS_EX_TRANSPARENT windows in WindowFromPoint, so
+ * the game finds the window under the character. GE-Proton 11-7 and newer
+ * take the input shape from the pixels, so the flag no longer stays set, and
+ * the game then only finds itself. Input is not affected by the flag. */
+static void keep_game_transparent(void)
+{
+    HWND game = FindWindowW(L"UnityWndClass", NULL);
+    if (!game) return;
+    LONG ex = GetWindowLongW(game, GWL_EXSTYLE);
+    if ((ex & (WS_EX_TRANSPARENT | WS_EX_LAYERED)) == (WS_EX_TRANSPARENT | WS_EX_LAYERED)) return;
+    SetWindowLongW(game, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+}
+
 /* KWin never activates the unmanaged game window, and the game ignores its
  * right-click menu while another Wine window is foreground */
 static void keep_game_foreground(void)
@@ -395,6 +410,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     CreateDirectoryA(CMD_DIR, NULL);
     if (getenv("GHOST_NO_WRITEBACK")) g_writeback = 0;
     if (getenv("GHOST_SCALE") && atof(getenv("GHOST_SCALE")) > 0) g_scale = atof(getenv("GHOST_SCALE"));
+    const char *gt = getenv("GHOST_GAME_TRANSPARENT");
+    if (gt && *gt && strcmp(gt, "0")) g_game_transparent = 1;
 
     /* styles of an ordinary application window */
     g_style   = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPSIBLINGS;
@@ -407,7 +424,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     wc.lpszClassName = L"Shell_TrayWnd";          RegisterClassW(&wc);
     wc.lpszClassName = L"Shell_SecondaryTrayWnd"; RegisterClassW(&wc);
 
-    logf_("start pid=%lu writeback=%d scale=%.2f", (unsigned long)GetCurrentProcessId(), g_writeback, g_scale);
+    logf_("start pid=%lu writeback=%d scale=%.2f game_transparent=%d", (unsigned long)GetCurrentProcessId(),
+          g_writeback, g_scale, g_game_transparent);
 
     /* wake on changes in the bridge dir instead of polling; fall back to
      * polling if change notifications are not available */
@@ -456,6 +474,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
         }
         tick();
         if (game_proc) keep_game_foreground();
+        if (game_proc && g_game_transparent) keep_game_transparent();
     }
     for (int i = 0; i < g_count; ++i) DestroyWindow(g_ghosts[i].hwnd);
     return 0;

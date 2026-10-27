@@ -20,6 +20,6 @@ win() {
 }
 win -o bin/ghost.exe src/ghost.c
 for t in enumtest fgprobe wbtest; do
-    win -o "bin/tools/$t.exe" "tools/$t.c"
+    win -o "bin/tools/$t.exe" "tools/$t.c" -ldwmapi
 done
 echo "built: bin/ghost-bridged bin/ghost.exe bin/tools/"

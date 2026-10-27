@@ -18,7 +18,7 @@ only been tested on one setup:
 
 - CachyOS, KDE Plasma 6.8.1, Wayland session
 - NVIDIA RTX 4060 Laptop GPU, driver 615.78
-- GE-Proton 11-7
+- GE-Proton 11-11
 - Desktop Mate 1.16.1dw
 
 Expect rough edges. Reports from other setups are welcome.
@@ -106,6 +106,7 @@ or [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
 | `DM_FPS` | | Frame rate cap below the game's own 60 FPS, for example 30 to save power. |
 | `DM_SHAPE_INTERVAL` | 200 | How often, in milliseconds, the click-through area is updated. |
 | `DM_PROTON` | | Path of a Proton build to use instead of the one chosen in Steam. |
+| `DM_GAME_TRANSPARENT` | 1 | Keep the click-through flag on the game window. See below. |
 | `DM_NO_BRIDGE` | | Set to 1 to run without the window bridge. |
 
 ## How it works
@@ -145,7 +146,15 @@ KWin script  <--(commands)-----  ghost-bridged  <--(cmd files)----  ghost.exe
   the real window.
 
 The invisible windows have an empty window region and are also unmanaged, so
-they are never drawn and never receive input. `ghost.exe` also keeps the game
+they are never drawn and never receive input.
+
+Click-through flag. On Windows the game marks its window as click-through
+(`WS_EX_TRANSPARENT`) whenever the cursor is not over the character, and window
+lookups then see past it to the window under the character. GE-Proton 11-7 and
+newer compute the click-through area from the pixels instead, and the flag no
+longer stays on the window. The game then only finds itself and the character
+stands on a window without attaching to it. `ghost.exe` puts the flag back.
+Input still follows the pixels, so clicking the character works as before. `ghost.exe` also keeps the game
 as Wine's foreground window, because the game ignores its right-click menu
 otherwise, and it exits when the game exits.
 

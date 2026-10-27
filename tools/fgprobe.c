@@ -6,11 +6,13 @@
  * cursor position to /dev/shm/ghost-bridge/fg.txt. "fg" makes the game
  * foreground, "desk" gives the foreground to Wine's desktop window, "steal"
  * makes a window of this process foreground and then exits, "wake" posts the
- * activation messages a focused window receives.
+ * activation messages a focused window receives, "wfp X Y" reports which
+ * window WindowFromPoint and ChildWindowFromPointEx return at X,Y.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static unsigned key(int vk) { return (unsigned)(GetAsyncKeyState(vk) & 0xffff); }
@@ -52,6 +54,17 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "desk")) {
         BOOL ok = SetForegroundWindow(GetDesktopWindow());
         printf("SetForegroundWindow(desktop)=%d fg=%p\n", ok, (void *)GetForegroundWindow());
+    }
+    if (argc > 3 && !strcmp(argv[1], "wfp")) {
+        POINT p = { atol(argv[2]), atol(argv[3]) };
+        HWND w = WindowFromPoint(p);
+        char c[128] = "", t[128] = "";
+        if (w) { GetClassNameA(w, c, sizeof c); GetWindowTextA(w, t, sizeof t); }
+        printf("WindowFromPoint(%ld,%ld)=%p cls='%s' title='%s'\n", p.x, p.y, (void *)w, c, t);
+        HWND d = ChildWindowFromPointEx(GetDesktopWindow(), p, CWP_SKIPINVISIBLE);
+        c[0] = t[0] = 0;
+        if (d) { GetClassNameA(d, c, sizeof c); GetWindowTextA(d, t, sizeof t); }
+        printf("ChildWindowFromPointEx(desktop)=%p cls='%s' title='%s'\n", (void *)d, c, t);
     }
     if (argc > 1 && !strcmp(argv[1], "wake") && game) {
         DWORD tid = GetWindowThreadProcessId(game, NULL);

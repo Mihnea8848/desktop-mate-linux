@@ -57,6 +57,7 @@ supervise_ghost() {
         echo "starting ghost.exe via $PROTON (try $tries)"
         WINE_LAYERED_OVERLAY_ALPHA='' WINE_LAYERED_OVERLAY_SHAPE_INTERVAL='' \
         DXVK_FRAME_RATE='' VKD3D_FRAME_RATE='' WINEDEBUG=-all GHOST_SCALE="$XSCALE" \
+        GHOST_GAME_TRANSPARENT="${DM_GAME_TRANSPARENT:-1}" \
             python3 "$PROTON" run "$DIR/bin/ghost.exe" </dev/null &
         runner=$!
         seen=0 missing=0
