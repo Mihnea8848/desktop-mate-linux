@@ -745,9 +745,113 @@ static void inspect_request(void)
         { "UniGLTF", "GltfData" }, { "UniGLTF", "RuntimeGltfInstance" }, { "UniGLTF", "ImporterContextExtensions" },
         { "VRMShaders", "ImmediateCaller" }, { "VRMShaders", "RuntimeOnlyAwaitCaller" },
         { "UniHumanoid", "HumanPoseTransfer" }, { "UniVRM10", "ControlRigGenerationOption" },
+        { "UniVRM10", "Vrm10RuntimeExpression" }, { "UniVRM10", "ExpressionKey" }, { "UniVRM10", "ExpressionPreset" },
     };
     for (size_t i = 0; i < sizeof classes / sizeof classes[0]; ++i) inspect_class(classes[i][0], classes[i][1]);
     inspect_characters();
+}
+
+/* Her face drives the VRM's expressions: each VRM preset follows the
+ * strongest of her matching blendshapes (0..100 -> 0..1). */
+static const struct { const char *preset; const char *shapes[6]; } g_face_map[] = {
+    { "get_BlinkLeft", { "facial_bs.eye_close_geo_L", "facial_bs.eyeBlinkLeft" } },
+    { "get_BlinkRight", { "facial_bs.eye_close_geo_R", "facial_bs.eyeBlinkRight" } },
+    { "get_Aa", { "facial_bs.mouth_a_geo_C" } },
+    { "get_Ih", { "facial_bs.mouth_i_geo_C" } },
+    { "get_Ou", { "facial_bs.mouth_u_geo_C" } },
+    { "get_Ee", { "facial_bs.mouth_e_geo_C" } },
+    { "get_Oh", { "facial_bs.mouth_o_geo_C", "facial_bs.mouth_oh_geo_C" } },
+    { "get_Happy", { "facial_bs.eye_wink_geo_L", "facial_bs.eye_wink_geo_R" } },
+    { "get_Angry", { "facial_bs.eye_angry_geo_L", "facial_bs.eye_angry_geo_R", "facial_bs.brow_angry_geo_L",
+                     "facial_bs.brow_angry_geo_R" } },
+    { "get_Sad", { "facial_bs.eye_sad_geo_L", "facial_bs.eye_sad_geo_R", "facial_bs.brow_troubled_geo_L",
+                   "facial_bs.brow_troubled_geo_R" } },
+    { "get_Surprised", { "facial_bs.eye_surprise_geo_L", "facial_bs.eye_surprise_geo_R", "facial_bs.brow_surprise_geo_L",
+                         "facial_bs.brow_surprise_geo_R", "facial_bs.mouth_surprise_geo_C" } },
+    { "get_Relaxed", { "facial_bs.eye_downcast_geo_L", "facial_bs.eye_downcast_geo_R" } },
+};
+#define FACE_KEYS (int)(sizeof g_face_map / sizeof g_face_map[0])
+static struct { void *key; int shapes[6]; } g_face[FACE_KEYS];
+static void *g_face_mesh, *g_face_expression;
+
+static void face_setup(void *orig, void *instance)
+{
+    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer"), *mesh_class = find_class("UnityEngine", "Mesh");
+    void *rs = children_of_type(orig, smr), *mesh = NULL;
+    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
+    for (uintptr_t i = 0; i < n && !g_face_mesh; ++i) {
+        void *r = ((void **)((char *)rs + 0x20))[i];
+        void *m = invoke(method(smr, "get_sharedMesh", 0), r, NULL);
+        if (m && unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), m, NULL)) > 0) {
+            g_face_mesh = r;
+            mesh = m;
+        }
+    }
+    void *vrm_instance = find_class("UniVRM10", "Vrm10Instance"), *runtime_class = find_class("UniVRM10", "Vrm10Runtime");
+    void *keys = find_class("UniVRM10", "ExpressionKey");
+    void *runtime = invoke(method(vrm_instance, "get_Runtime", 0), instance, NULL);
+    g_face_expression = runtime ? invoke(method(runtime_class, "get_Expression", 0), runtime, NULL) : NULL;
+    if (!g_face_mesh || !g_face_expression || !keys) {
+        logf_("face: mesh %p, expression %p", g_face_mesh, g_face_expression);
+        g_face_mesh = NULL;
+        return;
+    }
+    il_gchandle_new(g_face_mesh, 0);
+    il_gchandle_new(g_face_expression, 0);
+    int found = 0;
+    for (int k = 0; k < FACE_KEYS; ++k) {
+        g_face[k].key = invoke(method(keys, g_face_map[k].preset, 0), NULL, NULL);
+        if (g_face[k].key) il_gchandle_new(g_face[k].key, 0);
+        for (int j = 0; j < 6; ++j) {
+            g_face[k].shapes[j] = -1;
+            if (!g_face_map[k].shapes[j]) continue;
+            void *a[] = { il_string_new(g_face_map[k].shapes[j]) };
+            g_face[k].shapes[j] = unbox_int(invoke(method(mesh_class, "GetBlendShapeIndex", 1), mesh, a));
+            found += g_face[k].shapes[j] >= 0;
+        }
+    }
+    logf_("face: mirroring %d of her blendshapes onto %d expressions", found, FACE_KEYS);
+}
+
+static void face_tick(void)
+{
+    if (!g_face_mesh) return;
+    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
+    void *expr = find_class("UniVRM10", "Vrm10RuntimeExpression");
+    static void *get_weight, *set_weight;
+    if (!get_weight) get_weight = method(smr, "GetBlendShapeWeight", 1);
+    if (!set_weight) set_weight = method(expr, "SetWeight", 2);
+    for (int k = 0; k < FACE_KEYS; ++k) {
+        if (!g_face[k].key) continue;
+        float w = 0;
+        for (int j = 0; j < 6; ++j) {
+            int i = g_face[k].shapes[j];
+            if (i < 0) continue;
+            void *a[] = { &i };
+            void *r = invoke(get_weight, g_face_mesh, a);
+            float v = r ? *(float *)il_object_unbox(r) / 100.0f : 0;
+            if (v > w) w = v;
+        }
+        if (w > 1) w = 1;
+        void *b[] = { il_object_unbox(g_face[k].key), &w };
+        invoke(set_weight, g_face_expression, b);
+        /* temporary: what the VRM reports back */
+        static float peak[FACE_KEYS];
+        void *c[] = { il_object_unbox(g_face[k].key) };
+        void *got = invoke(method(expr, "GetWeight", 1), g_face_expression, c);
+        float gv = got ? *(float *)il_object_unbox(got) : -1;
+        if (gv > peak[k]) peak[k] = gv;
+        static int ticks;
+        if (k == FACE_KEYS - 1 && ++ticks % 160 == 0) {
+            char line[512];
+            int o = 0;
+            for (int j = 0; j < FACE_KEYS; ++j) {
+                o += snprintf(line + o, sizeof line - o, " %s=%.2f", g_face_map[j].preset + 4, peak[j]);
+                peak[j] = 0;
+            }
+            logf_("face peaks:%s", line);
+        }
+    }
 }
 
 /* Custom character proof of concept: write a Windows path of a .vrm file to
@@ -862,17 +966,24 @@ static void vrm_attach(void *instance)
     /* the game draws characters with its own lilToon build; MToon only casts a
        shadow there. Move the VRM's materials over, keeping texture and color. */
     void *shader_class = find_class("UnityEngine", "Shader"), *material_class = find_class("UnityEngine", "Material");
-    void *templ = NULL, *lil = NULL;
-    for (uintptr_t i = 0; i < nr && !templ; ++i) {
+    void *templ = NULL, *lil = NULL, *lil_transparent = NULL;
+    for (uintptr_t i = 0; i < nr; ++i) {
         void *m = invoke(method(renderer, "get_sharedMaterial", 0), ((void **)((char *)rs + 0x20))[i], NULL);
         void *sh = m ? invoke(method(material_class, "get_shader", 0), m, NULL) : NULL;
         char sname[128] = "";
         if (sh) to_ascii(invoke(method(shader_class, "get_name", 0), sh, NULL), sname, sizeof sname);
-        if (!strcmp(sname, "Hidden/lilToonEncryptable/lilToonOutline")) {
+        if (!templ && !strcmp(sname, "Hidden/lilToonEncryptable/lilToonOutline")) {
             templ = m;
             lil = sh;
         }
+        if (!lil_transparent && !strcmp(sname, "Hidden/lilToonEncryptable/lilToonTransparentOutline")) lil_transparent = sh;
     }
+    if (!lil_transparent) lil_transparent = lil;
+    /* no outline: her width and color depend on her own textures and drew
+       thick shells over the VRM's face. Her material is not copied, it holds
+       the keys that unscramble the game's meshes. */
+    static const char *const fset[] = { "System.String", "System.Single" };
+    float outline_width = 0;
     void *vrs = children_of_type(instance, renderer);
     uintptr_t nv = vrs ? *(uintptr_t *)((char *)vrs + 0x18) : 0;
     int changed = 0;
@@ -885,24 +996,27 @@ static void vrm_attach(void *instance)
         uintptr_t nm = mats ? *(uintptr_t *)((char *)mats + 0x18) : 0;
         for (uintptr_t j = 0; j < nm; ++j) {
             void *m = ((void **)((char *)mats + 0x20))[j];
+            int queue = unbox_int(invoke(method(material_class, "get_renderQueue", 0), m, NULL));
             void *tex = invoke(method(material_class, "get_mainTexture", 0), m, NULL);
             void *col = invoke(method(material_class, "get_color", 0), m, NULL);
             float c[4] = { 1, 1, 1, 1 };
             if (col) memcpy(c, il_object_unbox(col), sizeof c);
-            void *a[] = { lil };
+            /* cutout and transparent parts (eye highlights, lashes) stay see-through */
+            void *a[] = { queue >= 2450 ? lil_transparent : lil };
             invoke(method(material_class, "set_shader", 1), m, a);
             void *tp[] = { templ };
             if (GetFileAttributesA(RUN_DIR "dmhook.vrm-copyprops") != INVALID_FILE_ATTRIBUTES)
                 invoke(method(material_class, "CopyPropertiesFromMaterial", 1), m, tp);
-            /* her keys unscramble the game's own meshes; ours are not scrambled */
-            static const char *const fsig[] = { "System.String", "System.Single" };
-            float one = 1;
-            void *fa[] = { il_string_new("_IgnoreEncryption"), &one };
-            invoke(method_typed(material_class, "SetFloat", 2, fsig), m, fa);
             void *t[] = { tex };
             invoke(method(material_class, "set_mainTexture", 1), m, t);
             void *cc[] = { c };
             invoke(method(material_class, "set_color", 1), m, cc);
+            void *ow[] = { il_string_new("_OutlineWidth"), &outline_width };
+            invoke(method_typed(material_class, "SetFloat", 2, fset), m, ow);
+            if (queue >= 2450) {
+                void *q[] = { &queue };
+                invoke(method(material_class, "set_renderQueue", 1), m, q);
+            }
             changed++;
         }
     }
@@ -934,6 +1048,7 @@ static void vrm_attach(void *instance)
     il_gchandle_new(dst, 0);
     g_pose_src = src;
     g_pose_dst = dst;
+    face_setup(orig, instance);
     logf_("vrm: attached, %lu renderers hidden", (unsigned long)nr);
 }
 
@@ -1009,9 +1124,71 @@ static void vrm_diag(void)
     }
 }
 
+/* Face sampling: write a number of ticks to dmhook.face. While it runs the
+ * worker ticks fast; at the end every blendshape of her meshes that moved is
+ * logged with its largest weight. */
+static int g_fast_ticks;
+static void face_sample(void)
+{
+    static void *meshes[32], *names_done;
+    static float maxw[32][256];
+    static int nmeshes, total;
+    FILE *f = fopen(RUN_DIR "dmhook.face", "r");
+    if (f) {
+        if (fscanf(f, "%d", &total) != 1) total = 150;
+        fclose(f);
+        DeleteFileA(RUN_DIR "dmhook.face");
+        void *orig = find_character_animator();
+        void *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
+        void *rs = orig ? children_of_type(orig, smr) : NULL;
+        uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
+        nmeshes = 0;
+        for (uintptr_t i = 0; i < n && nmeshes < 32; ++i) {
+            meshes[nmeshes] = ((void **)((char *)rs + 0x20))[i];
+            il_gchandle_new(meshes[nmeshes], 0);
+            memset(maxw[nmeshes], 0, sizeof maxw[0]);
+            nmeshes++;
+        }
+        g_fast_ticks = total;
+        names_done = NULL;
+        logf_("face: sampling %d meshes for %d ticks", nmeshes, total);
+        return;
+    }
+    if (!g_fast_ticks || !nmeshes) return;
+    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer"), *mesh_class = find_class("UnityEngine", "Mesh");
+    for (int m = 0; m < nmeshes; ++m) {
+        void *mesh = invoke(method(smr, "get_sharedMesh", 0), meshes[m], NULL);
+        int count = mesh ? unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), mesh, NULL)) : 0;
+        for (int i = 0; i < count && i < 256; ++i) {
+            void *a[] = { &i };
+            void *w = invoke(method(smr, "GetBlendShapeWeight", 1), meshes[m], a);
+            float v = w ? *(float *)il_object_unbox(w) : 0;
+            if (v > maxw[m][i]) maxw[m][i] = v;
+        }
+    }
+    if (--g_fast_ticks) return;
+    for (int m = 0; m < nmeshes; ++m) {
+        void *mesh = invoke(method(smr, "get_sharedMesh", 0), meshes[m], NULL);
+        int count = mesh ? unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), mesh, NULL)) : 0;
+        char rname[64];
+        to_ascii(invoke(method(ui.object, "get_name", 0), meshes[m], NULL), rname, sizeof rname);
+        if (!count) continue;
+        logf_("face: %s has %d blendshapes", rname, count);
+        for (int i = 0; i < count && i < 256; ++i) {
+            char sname[96];
+            void *a[] = { &i };
+            to_ascii(invoke(method(mesh_class, "GetBlendShapeName", 1), mesh, a), sname, sizeof sname);
+            logf_("face:   %3d %-40s max %.0f", i, sname, maxw[m][i]);
+        }
+    }
+    (void)names_done;
+}
+
 static void vrm_request(void)
 {
     vrm_diag();
+    face_sample();
+    face_tick();
     if (g_vrm_task) {
         void *k = il_object_get_class(g_vrm_task);
         void *done = invoke(method(k, "get_IsCompleted", 0), g_vrm_task, NULL);
@@ -1158,7 +1335,7 @@ static DWORD WINAPI worker(void *arg)
             held = now;
             PostMessageW(hooked, WM_DMHOOK, held ? 1 : 2, 0);
         }
-        if (waited >= TICK_MS) {
+        if (waited >= (g_fast_ticks || g_face_mesh ? 30u : (DWORD)TICK_MS)) {
             PostMessageW(hooked, WM_DMHOOK, 0, 0);
             waited = 0;
         }
