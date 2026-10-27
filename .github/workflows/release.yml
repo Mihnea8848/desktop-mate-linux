@@ -73,8 +73,9 @@ jobs:
           repo-add --sign --key "$SIGNING_FPR" --remove desktop-mate-linux.db.tar.gz "$pkg"
           # pacman reads desktop-mate-linux.db; release assets cannot be symlinks
           for f in db files; do
-            cp -L "desktop-mate-linux.$f.tar.gz" "desktop-mate-linux.$f"
-            cp -L "desktop-mate-linux.$f.tar.gz.sig" "desktop-mate-linux.$f.sig"
+            rm -f "desktop-mate-linux.$f" "desktop-mate-linux.$f.sig"
+            cp "desktop-mate-linux.$f.tar.gz" "desktop-mate-linux.$f"
+            cp "desktop-mate-linux.$f.tar.gz.sig" "desktop-mate-linux.$f.sig"
           done
           gh release upload repo --clobber "$pkg" "$pkg.sig" \
             desktop-mate-linux.db desktop-mate-linux.db.sig desktop-mate-linux.files desktop-mate-linux.files.sig \
