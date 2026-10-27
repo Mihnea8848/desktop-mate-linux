@@ -53,9 +53,9 @@ main() {
     mv -T "$root/current.tmp" "$root/current"
     mkdir -p "$bindir"
     ln -sfn "$root/current/desktop-mate-linux" "$bindir/desktop-mate-linux"
-    # keep this version and the one before it
-    for old in $(ls -1t "$root/versions" | tail -n +3); do
-        rm -rf "${root:?}/versions/$old"
+    # keep this version and the one it replaces
+    for old in "$root"/versions/*; do
+        case "${old##*/}" in "$tag" | "$installed") ;; *) rm -rf "$old" ;; esac
     done
 
     if [ "$mode" = --update ]; then
