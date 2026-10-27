@@ -30,6 +30,9 @@ they choose. This repository is for the Linux users.
 - Reacting to the cursor anywhere on the screen, also over native Wayland apps
 - Tray icon and its menu
 - "Launch at startup" from the game's settings
+- A "Linux" section in the game's own settings page (Global Settings, at the
+  bottom) with a battery saver and switches for window sitting and smooth
+  animation
 
 I run it every day on CachyOS, KDE Plasma 6.8.1 (Wayland), an NVIDIA RTX 4060
 and GE-Proton 11-11. Other setups are untested, so I would love to hear how it
@@ -100,6 +103,10 @@ in `~/.config/desktop-mate-linux/local.conf`.
 | `DM_PROTON` | | Use this Proton folder instead of the one chosen in Steam |
 | `DM_SHAPE_INTERVAL` | 200 | How often, in ms, the clickable area is updated |
 | `DM_NO_BRIDGE` | | Set to 1 to turn off window sitting |
+| `DM_HOOK` | 1 | Set to 0 to leave the game's settings page alone |
+
+The Linux section in the game's settings saves to
+`~/.config/desktop-mate-linux/game.conf`, which is read after `local.conf`.
 
 `local.conf.example` lists a few more for troubleshooting.
 
@@ -127,12 +134,12 @@ A KWin script sends the real window list and cursor position to a small helper
 that runs inside the game's Wine session. The helper creates an invisible copy
 of each window there, so the game sees your desktop as if it were on Windows,
 and sends the game's moves and minimizes back to KWin. GE-Proton's overlay
-patch provides the transparency. The details, and everything I measured, are in
+patch provides the transparency, and a small library loaded into the game adds
+the Linux section to its settings page. The details, and everything I measured, are in
 [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Roadmap
 
-- Settings for this project inside the game's own menu (in progress)
 - Hyprland and sway support
 - The GE-Proton fixes merged upstream, so no custom build is needed
 

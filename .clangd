@@ -1,4 +1,4 @@
 If:
-  PathMatch: [src/ghost\.c, tools/.*\.c]
+  PathMatch: [src/ghost\.c, src/dmhook\.c, tools/.*\.c]
 CompileFlags:
   Add: [--target=x86_64-w64-mingw32]
