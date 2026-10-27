@@ -736,8 +736,18 @@ static void inspect_characters(void)
 
 static void inspect_request(void)
 {
-    if (GetFileAttributesA(RUN_DIR "dmhook.inspect") == INVALID_FILE_ATTRIBUTES) return;
+    FILE *f = fopen(RUN_DIR "dmhook.inspect", "r");
+    if (!f) return;
+    /* lines "Namespace Class" pick the classes; an empty file lists the defaults */
+    char ns[96], cn[96];
+    int listed = 0;
+    while (fscanf(f, "%95s %95s", ns, cn) == 2) {
+        inspect_class(ns, cn);
+        listed++;
+    }
+    fclose(f);
     DeleteFileA(RUN_DIR "dmhook.inspect");
+    if (listed) return;
     static const char *classes[][2] = {
         { "UniVRM10", "Vrm10" }, { "UniVRM10", "Vrm10Data" }, { "UniVRM10", "Vrm10Importer" },
         { "UniVRM10", "Vrm10Instance" }, { "UniVRM10", "Vrm10Runtime" }, { "UniVRM10", "MigrationVrm" },
@@ -889,6 +899,58 @@ static void *find_character_animator(void)
     return NULL;
 }
 
+/* Shading like the game's characters. Their lilToon materials put the shadow
+ * edge at half-lambert 0.36 with blur 0.14 and add a 30% rim light; in MToon
+ * terms that is shift 0.28 and toony 0.86. The author's colors, textures and
+ * outline stay; transparent parts (eyes) are left alone. */
+static void vrm_game_look(void *m)
+{
+    void *material = find_class("UnityEngine", "Material");
+    static const char *const s1[] = { "System.String" }, *const sf[] = { "System.String", "System.Single" };
+    static const char *const sc[] = { "System.String", "UnityEngine.Color" };
+    static const char *const st[] = { "System.String", "UnityEngine.Texture" };
+    void *gf = method_typed(material, "GetFloat", 1, s1), *setf = method_typed(material, "SetFloat", 2, sf);
+    void *gc = method_typed(material, "GetColor", 1, s1), *setc = method_typed(material, "SetColor", 2, sc);
+    void *gt = method_typed(material, "GetTexture", 1, s1), *sett = method_typed(material, "SetTexture", 2, st);
+    void *has = method_typed(material, "HasProperty", 1, s1);
+    if (!gf || !setf || !gc || !setc || !has) return;
+    void *am[] = { il_string_new("_AlphaMode") };
+    void *h = invoke(has, m, am), *r;
+    if (!h || !*(uint8_t *)il_object_unbox(h)) return;
+    if ((r = invoke(gf, m, am)) && *(float *)il_object_unbox(r) >= 2) return;
+
+    static const struct { const char *name; float value; } floats[] = {
+        { "_ShadingShiftFactor", 0.28f }, { "_ShadingToonyFactor", 0.86f },
+        { "_RimFresnelPower", 5 }, { "_RimLift", 0 }, { "_RimLightingMix", 1 },
+    };
+    for (size_t i = 0; i < sizeof floats / sizeof floats[0]; ++i) {
+        float v = floats[i].value;
+        void *a[] = { il_string_new(floats[i].name), &v };
+        invoke(setf, m, a);
+    }
+    float rim[4] = { 0.3f, 0.3f, 0.3f, 1 };
+    void *ra[] = { il_string_new("_RimColor"), rim };
+    invoke(setc, m, ra);
+
+    /* MToon shades with _ShadeColor times _ShadeTex; without a shade texture a
+     * white shade color means no visible shadow at all */
+    void *tn[] = { il_string_new("_ShadeTex") };
+    void *tex = gt ? invoke(gt, m, tn) : NULL;
+    void *sn[] = { il_string_new("_ShadeColor") };
+    r = invoke(gc, m, sn);
+    float *shade = r ? il_object_unbox(r) : NULL;
+    if (!tex && sett) {
+        void *main = invoke(method(material, "get_mainTexture", 0), m, NULL);
+        void *a[] = { tn[0], main };
+        if (main) invoke(sett, m, a);
+    }
+    if (shade && shade[0] > 0.99f && shade[1] > 0.99f && shade[2] > 0.99f) {
+        float tint[4] = { 0.82f, 0.76f, 0.85f, 1 };
+        void *a[] = { sn[0], tint };
+        invoke(setc, m, a);
+    }
+}
+
 static void vrm_attach(void *instance)
 {
     int stage = 3;
@@ -933,6 +995,28 @@ static void vrm_attach(void *instance)
         }
         void *a[] = { q };
         invoke(method(transform, props[i][1], 1), vt, a);
+    }
+
+    /* same hip height as hers, so sitting on a window lines up; Animator.humanScale
+     * is the hip height of the avatar's rest pose */
+    {
+        void *animator = find_class("UnityEngine", "Animator");
+        static const char *const tsig1[] = { "System.Type" };
+        void *ta[] = { il_type_get_object(il_class_get_type(animator)) };
+        void *va = invoke(method_typed(component, "GetComponent", 1, tsig1), instance, ta);
+        void *hs = invoke(method(animator, "get_humanScale", 0), orig, NULL);
+        void *vs = va ? invoke(method(animator, "get_humanScale", 0), va, NULL) : NULL;
+        float her = hs ? *(float *)il_object_unbox(hs) : 0, ours = vs ? *(float *)il_object_unbox(vs) : 0;
+        logf_("vrm: hip height %.3f, hers %.3f", ours, her);
+        if (her > 0 && ours > 0 && GetFileAttributesA(RUN_DIR "dmhook.vrm-nofit") == INVALID_FILE_ATTRIBUTES) {
+            void *v = invoke(method(transform, "get_localScale", 0), vt, NULL);
+            float *sc = v ? il_object_unbox(v) : NULL;
+            if (sc) {
+                for (int i = 0; i < 3; ++i) sc[i] *= her / ours;
+                void *a[] = { sc };
+                invoke(method(transform, "set_localScale", 1), vt, a);
+            }
+        }
     }
 
     /* her meshes are on the layer the character camera draws; use it for ours */
@@ -1008,6 +1092,7 @@ static void vrm_attach(void *instance)
                 invoke(method(material_class, "set_shader", 1), m, a);
                 void *q[] = { &queue };
                 invoke(method(material_class, "set_renderQueue", 1), m, q);
+                if (GetFileAttributesA(RUN_DIR "dmhook.vrm-authorlook") == INVALID_FILE_ATTRIBUTES) vrm_game_look(m);
                 moved++;
             }
         }
@@ -1140,6 +1225,98 @@ static void describe_renderers(const char *what, void *comp)
     }
 }
 
+/* the lilToon and MToon properties a material has, with their values; the
+ * game strips property enumeration, so the names are listed here */
+static const char *const g_look_props[] = {
+    "_Color", "_AsUnlit", "_LightMinLimit", "_LightMaxLimit", "_BeforeExposureLimit", "_MonochromeLighting",
+    "_lilDirectionalLightStrength", "_UseShadow", "_ShadowStrength", "_ShadowColor", "_ShadowBorder", "_ShadowBlur",
+    "_ShadowNormalStrength", "_ShadowReceive", "_Shadow2ndColor", "_Shadow2ndBorder", "_Shadow2ndBlur",
+    "_Shadow3rdColor", "_ShadowBorderColor", "_ShadowBorderRange", "_ShadowMainStrength", "_ShadowEnvStrength",
+    "_ShadowAOShift", "_UseRim", "_RimColor", "_RimBorder", "_RimBlur", "_RimFresnelPower", "_RimEnableLighting",
+    "_RimShadowMask", "_UseRimShade", "_RimShadeColor", "_RimShadeBorder", "_RimShadeBlur", "_RimShadeFresnelPower",
+    "_UseBacklight", "_BacklightColor", "_UseMatCap", "_MatCapColor", "_MatCapBlend", "_UseEmission",
+    "_EmissionColor", "_OutlineColor", "_OutlineWidth", "_OutlineLitColor", "_OutlineEnableLighting",
+    "_OutlineFixWidth", "_OutlineVertexR2Width", "_Cull", "_Cutoff", "_ShadeColor", "_ShadingShiftFactor",
+    "_ShadingToonyFactor", "_GiEqualization", "_MatcapColor", "_RimLift", "_RimLightingMix", "_OutlineWidthMode",
+    "_OutlineLightingMix", "_M_CullMode", "_AlphaMode", "_ShadeShift", "_ShadeToony", "_LightColorAttenuation",
+    "_IndirectLightIntensity", "_OutlineScaledMaxDistance", "_OutlineColorMode", "_Brightness",
+};
+
+static void dump_material(const char *what, void *m)
+{
+    void *material = find_class("UnityEngine", "Material"), *shader = find_class("UnityEngine", "Shader");
+    void *sh = invoke(method(material, "get_shader", 0), m, NULL);
+    if (!sh) return;
+    char mname[64], sname[96];
+    to_ascii(invoke(method(ui.object, "get_name", 0), m, NULL), mname, sizeof mname);
+    to_ascii(invoke(method(shader, "get_name", 0), sh, NULL), sname, sizeof sname);
+    static const char *const s1[] = { "System.String" }, *const i1[] = { "System.Int32" };
+    void *has = method_typed(material, "HasProperty", 1, s1), *hasf = method_typed(material, "HasFloat", 1, i1);
+    void *gf = method_typed(material, "GetFloat", 1, s1), *gv = method_typed(material, "GetVector", 1, s1);
+    void *id = method_typed(shader, "PropertyToID", 1, s1);
+    void *kw = invoke(method(material, "get_shaderKeywords", 0), m, NULL);
+    char kws[400] = "";
+    uintptr_t nk = kw ? *(uintptr_t *)((char *)kw + 0x18) : 0;
+    for (uintptr_t i = 0, o = 0; i < nk && o < 380; ++i) {
+        char k[64];
+        to_ascii(((void **)((char *)kw + 0x20))[i], k, sizeof k);
+        o += snprintf(kws + o, sizeof kws - o, "%s ", k);
+    }
+    logf_("%s material %s, shader %s, %d passes, queue %d, keywords %s", what, mname, sname,
+          unbox_int(invoke(method(shader, "get_passCount", 0), sh, NULL)),
+          unbox_int(invoke(method(material, "get_renderQueue", 0), m, NULL)), kws);
+    char line[900];
+    int o = 0;
+    for (size_t i = 0; i < sizeof g_look_props / sizeof g_look_props[0]; ++i) {
+        void *a[] = { il_string_new(g_look_props[i]) };
+        void *h = invoke(has, m, a);
+        if (!h || !*(uint8_t *)il_object_unbox(h)) continue;
+        int pid = unbox_int(invoke(id, NULL, a));
+        void *ia[] = { &pid };
+        void *isf = invoke(hasf, m, ia);
+        if (isf && *(uint8_t *)il_object_unbox(isf)) {
+            void *r = invoke(gf, m, a);
+            o += snprintf(line + o, sizeof line - o, " %s=%.3g", g_look_props[i], r ? *(float *)il_object_unbox(r) : -1);
+        } else {
+            void *r = invoke(gv, m, a);
+            float *v = r ? il_object_unbox(r) : NULL;
+            if (v) o += snprintf(line + o, sizeof line - o, " %s=(%.2f %.2f %.2f %.2f)", g_look_props[i], v[0], v[1], v[2], v[3]);
+        }
+        if (o > 700) {
+            logf_(" %s", line);
+            o = 0;
+        }
+    }
+    if (o) logf_(" %s", line);
+}
+
+/* each distinct material under comp; one per shader when by_shader is set */
+static void dump_materials(const char *what, void *comp, int by_shader)
+{
+    void *renderer = find_class("UnityEngine", "Renderer"), *material = find_class("UnityEngine", "Material");
+    void *rs = children_of_type(comp, renderer);
+    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
+    void *seen[24];
+    int nseen = 0;
+    for (uintptr_t i = 0; i < n && nseen < 24; ++i) {
+        void *ms = invoke(method(renderer, "get_sharedMaterials", 0), ((void **)((char *)rs + 0x20))[i], NULL);
+        uintptr_t nm = ms ? *(uintptr_t *)((char *)ms + 0x18) : 0;
+        for (uintptr_t j = 0; j < nm && nseen < 24; ++j) {
+            void *m = ((void **)((char *)ms + 0x20))[j];
+            void *key = m && by_shader ? invoke(method(material, "get_shader", 0), m, NULL) : m;
+            int dup = !key;
+            for (int k = 0; k < nseen && !dup; ++k) dup = seen[k] == key;
+            if (dup) continue;
+            seen[nseen++] = key;
+            char rn[64];
+            void *go = invoke(method(find_class("UnityEngine", "Component"), "get_gameObject", 0), ((void **)((char *)rs + 0x20))[i], NULL);
+            to_ascii(invoke(method(ui.object, "get_name", 0), go, NULL), rn, sizeof rn);
+            logf_("%s renderer %s:", what, rn);
+            dump_material(what, m);
+        }
+    }
+}
+
 static void vrm_diag(void)
 {
     if (GetFileAttributesA(RUN_DIR "dmhook.vrmdiag") == INVALID_FILE_ATTRIBUTES) return;
@@ -1147,6 +1324,11 @@ static void vrm_diag(void)
     void *orig = find_character_animator();
     if (orig) describe_renderers("character", orig);
     if (g_vrm_instance) describe_renderers("vrm", g_vrm_instance);
+    if (GetFileAttributesA(RUN_DIR "dmhook.vrmdiag-mat") != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileA(RUN_DIR "dmhook.vrmdiag-mat");
+        if (g_pose_src || orig) dump_materials("character", g_pose_src ? g_pose_src : orig, 0);
+        if (g_vrm_instance) dump_materials("vrm", g_vrm_instance, 0);
+    }
     void *behaviour = find_class("UnityEngine", "Behaviour");
     for (int i = 0; i < 2; ++i) {
         void *c = i ? g_pose_dst : g_pose_src;
