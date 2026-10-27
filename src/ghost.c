@@ -371,6 +371,10 @@ static void tick(void)
  * the game then only finds itself. Input is not affected by the flag. */
 static void keep_game_transparent(void)
 {
+    /* the game clears the flag while the pointer is on the character; putting
+       it back during a drag makes Wine reset the input shape every time and
+       the drag stutters. Restore it once the button is released. */
+    if (GetAsyncKeyState(VK_LBUTTON) < 0 || GetAsyncKeyState(VK_RBUTTON) < 0) return;
     HWND game = FindWindowW(L"UnityWndClass", NULL);
     if (!game) return;
     LONG ex = GetWindowLongW(game, GWL_EXSTYLE);
