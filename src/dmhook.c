@@ -125,6 +125,18 @@ static int32_t (*il_string_length)(void *);
 static void *(*il_class_get_field_from_name)(void *, const char *);
 static void (*il_field_get_value)(void *, void *, void *);
 static uint32_t (*il_gchandle_new)(void *, int);
+static void *(*il_class_get_methods)(void *, void **);
+static const char *(*il_method_get_name)(void *);
+static uint32_t (*il_method_get_param_count)(void *);
+static void *(*il_method_get_param)(void *, uint32_t);
+static void *(*il_method_get_return_type)(void *);
+static uint32_t (*il_method_get_flags)(void *, uint32_t *);
+static char *(*il_type_get_name)(void *);
+static void *(*il_class_get_parent)(void *);
+static void *(*il_class_get_fields)(void *, void **);
+static const char *(*il_field_get_name)(void *);
+static void *(*il_field_get_type)(void *);
+static void (*il_field_set_value)(void *, void *, void *);
 
 static int resolve_api(void)
 {
@@ -133,7 +145,9 @@ static int resolve_api(void)
     R(class_get_method_from_name) R(class_get_name) R(class_get_type) R(type_get_object)
     R(object_get_class) R(object_unbox) R(object_new) R(runtime_invoke) R(string_new)
     R(string_chars) R(string_length) R(class_get_field_from_name) R(field_get_value)
-    R(gchandle_new)
+    R(gchandle_new) R(class_get_methods) R(method_get_name) R(method_get_param_count)
+    R(method_get_param) R(method_get_return_type) R(method_get_flags) R(type_get_name) R(class_get_parent)
+    R(class_get_fields) R(field_get_name) R(field_get_type) R(field_set_value)
 #undef R
     return 1;
 }
@@ -629,6 +643,420 @@ static void tick_bright(void)
     }
 }
 
+/* method by name and exact parameter types, for overloaded methods; walks
+ * the base classes */
+static void *method_typed(void *klass, const char *name, int argc, const char *const types[])
+{
+    for (void *k = klass; k; k = il_class_get_parent(k)) {
+        void *iter = NULL, *m;
+        while ((m = il_class_get_methods(k, &iter))) {
+            if (strcmp(il_method_get_name(m), name) || (int)il_method_get_param_count(m) != argc) continue;
+            int ok = 1;
+            for (int i = 0; i < argc && ok; ++i) ok = !strcmp(il_type_get_name(il_method_get_param(m, i)), types[i]);
+            if (ok) return m;
+        }
+    }
+    logf_("method %s(%s...) not found", name, argc ? types[0] : "");
+    return NULL;
+}
+
+/* all components of type cls under comp, including inactive ones */
+static void *children_of_type(void *comp, void *cls)
+{
+    static const char *const sig[] = { "System.Type", "System.Boolean" };
+    uint8_t yes = 1;
+    void *a[] = { il_type_get_object(il_class_get_type(cls)), &yes };
+    return invoke(method_typed(find_class("UnityEngine", "Component"), "GetComponentsInChildren", 2, sig), comp, a);
+}
+
+/* Inspection for the custom character work: write anything to
+ * /dev/shm/ghost-bridge/dmhook.inspect. Lists the VRM runtime's classes and
+ * methods and the structure of the characters in the scene. */
+static void inspect_class(const char *ns, const char *name)
+{
+    size_t n = 0;
+    void **asms = il_domain_get_assemblies(il_domain_get(), &n), *k = NULL;
+    for (size_t i = 0; i < n && !k; ++i) k = il_class_from_name(il_assembly_get_image(asms[i]), ns, name);
+    if (!k) {
+        logf_("class %s.%s: missing", ns, name);
+        return;
+    }
+    logf_("class %s.%s (base %s)", ns, name, il_class_get_parent(k) ? il_class_get_name(il_class_get_parent(k)) : "-");
+    void *fiter = NULL, *f;
+    while ((f = il_class_get_fields(k, &fiter)))
+        logf_("  field %s %s", il_type_get_name(il_field_get_type(f)), il_field_get_name(f));
+    void *iter = NULL, *m;
+    while ((m = il_class_get_methods(k, &iter))) {
+        char sig[600];
+        int o = 0;
+        uint32_t iflags = 0, flags = il_method_get_flags(m, &iflags);
+        for (uint32_t i = 0, c = il_method_get_param_count(m); i < c && o < 500; ++i)
+            o += snprintf(sig + o, sizeof sig - o, "%s%s", i ? ", " : "", il_type_get_name(il_method_get_param(m, i)));
+        sig[o] = 0;
+        logf_("  %s%s %s(%s)", flags & 0x10 ? "static " : "", il_type_get_name(il_method_get_return_type(m)),
+              il_method_get_name(m), sig);
+    }
+}
+
+static void inspect_characters(void)
+{
+    void *animator = find_class("UnityEngine", "Animator"), *component = find_class("UnityEngine", "Component");
+    void *transform = find_class("UnityEngine", "Transform"), *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
+    void *go = find_class("UnityEngine", "GameObject");
+    int none = 0;
+    void *args[] = { il_type_get_object(il_class_get_type(animator)), &none };
+    void *arr = invoke(ui.find_objects, NULL, args);
+    uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
+    logf_("animators: %lu (class %p, array %p)", (unsigned long)n, animator, arr);
+    for (uintptr_t i = 0; i < n; ++i) {
+        void *a = ((void **)((char *)arr + 0x20))[i];
+        char path[512] = "", name[96];
+        void *t = invoke(method(component, "get_transform", 0), a, NULL);
+        for (int d = 0; t && d < 12; ++d) {
+            to_ascii(invoke(method(ui.object, "get_name", 0), t, NULL), name, sizeof name);
+            char tmp[512];
+            snprintf(tmp, sizeof tmp, "/%s%s", name, path);
+            snprintf(path, sizeof path, "%s", tmp);
+            t = invoke(method(transform, "get_parent", 0), t, NULL);
+        }
+        void *ctl = invoke(method(animator, "get_runtimeAnimatorController", 0), a, NULL);
+        char ctlname[96] = "-";
+        if (ctl) to_ascii(invoke(method(ui.object, "get_name", 0), ctl, NULL), ctlname, sizeof ctlname);
+        void *human = invoke(method(animator, "get_isHuman", 0), a, NULL);
+        void *en = invoke(method(find_class("UnityEngine", "Behaviour"), "get_enabled", 0), a, NULL);
+        void *g = invoke(method(component, "get_gameObject", 0), a, NULL);
+        void *layer = g ? invoke(method(go, "get_layer", 0), g, NULL) : NULL;
+        void *meshes = children_of_type(a, smr);
+        logf_("  %s: controller %s, human %d, enabled %d, layer %d, skinned meshes %lu", path, ctlname,
+              human ? *(uint8_t *)il_object_unbox(human) : -1, en ? *(uint8_t *)il_object_unbox(en) : -1,
+              layer ? *(int32_t *)il_object_unbox(layer) : -1,
+              meshes ? (unsigned long)*(uintptr_t *)((char *)meshes + 0x18) : 0UL);
+    }
+}
+
+static void inspect_request(void)
+{
+    if (GetFileAttributesA(RUN_DIR "dmhook.inspect") == INVALID_FILE_ATTRIBUTES) return;
+    DeleteFileA(RUN_DIR "dmhook.inspect");
+    static const char *classes[][2] = {
+        { "UniVRM10", "Vrm10" }, { "UniVRM10", "Vrm10Data" }, { "UniVRM10", "Vrm10Importer" },
+        { "UniVRM10", "Vrm10Instance" }, { "UniVRM10", "Vrm10Runtime" }, { "UniVRM10", "MigrationVrm" },
+        { "UniVRM10", "UrpVrm10MaterialDescriptorGenerator" }, { "UniGLTF", "GlbFileParser" },
+        { "UniGLTF", "GltfData" }, { "UniGLTF", "RuntimeGltfInstance" }, { "UniGLTF", "ImporterContextExtensions" },
+        { "VRMShaders", "ImmediateCaller" }, { "VRMShaders", "RuntimeOnlyAwaitCaller" },
+        { "UniHumanoid", "HumanPoseTransfer" }, { "UniVRM10", "ControlRigGenerationOption" },
+    };
+    for (size_t i = 0; i < sizeof classes / sizeof classes[0]; ++i) inspect_class(classes[i][0], classes[i][1]);
+    inspect_characters();
+}
+
+/* Custom character proof of concept: write a Windows path of a .vrm file to
+ * /dev/shm/ghost-bridge/dmhook.vrm. The VRM is loaded with the game's own
+ * UniVRM10, put where the character's model is, and follows her pose through
+ * UniHumanoid.HumanPoseTransfer while her own meshes are hidden. */
+static void *g_vrm_task, *g_pose_src, *g_pose_dst;
+
+static void set_field(void *obj, const char *name, void *value)
+{
+    void *f = il_class_get_field_from_name(il_object_get_class(obj), name);
+    if (f) il_field_set_value(obj, f, value);
+    else logf_("vrm: no field %s", name);
+}
+
+/* the humanoid Animator of the character under VRMRoot */
+static void *find_character_animator(void)
+{
+    void *animator = find_class("UnityEngine", "Animator"), *component = find_class("UnityEngine", "Component");
+    void *transform = find_class("UnityEngine", "Transform");
+    int none = 0;
+    void *args[] = { il_type_get_object(il_class_get_type(animator)), &none };
+    void *arr = invoke(ui.find_objects, NULL, args);
+    uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
+    for (uintptr_t i = 0; i < n; ++i) {
+        void *a = ((void **)((char *)arr + 0x20))[i];
+        void *human = invoke(method(animator, "get_isHuman", 0), a, NULL);
+        if (!human || !*(uint8_t *)il_object_unbox(human)) continue;
+        void *t = invoke(method(component, "get_transform", 0), a, NULL);
+        void *parent = t ? invoke(method(transform, "get_parent", 0), t, NULL) : NULL;
+        char name[64] = "";
+        if (parent) to_ascii(invoke(method(ui.object, "get_name", 0), parent, NULL), name, sizeof name);
+        if (!strcmp(name, "VRMRoot")) return a;
+    }
+    return NULL;
+}
+
+static void vrm_attach(void *instance)
+{
+    int stage = 3;
+    FILE *sf = fopen(RUN_DIR "dmhook.vrmstage", "r");
+    if (sf) {
+        if (fscanf(sf, "%d", &stage) != 1) stage = 3;
+        fclose(sf);
+    }
+    logf_("vrm: attach stage %d", stage);
+    if (stage < 1) return;
+    void *component = find_class("UnityEngine", "Component"), *transform = find_class("UnityEngine", "Transform");
+    void *go_class = find_class("UnityEngine", "GameObject"), *renderer = find_class("UnityEngine", "Renderer");
+    void *pose = find_class("UniHumanoid", "HumanPoseTransfer");
+    void *orig = find_character_animator();
+    if (!orig || !pose) {
+        logf_("vrm: character animator %p, HumanPoseTransfer %p", orig, pose);
+        return;
+    }
+    void *ot = invoke(method(component, "get_transform", 0), orig, NULL);
+    void *og = invoke(method(component, "get_gameObject", 0), orig, NULL);
+    void *vt = invoke(method(component, "get_transform", 0), instance, NULL);
+    void *vg = invoke(method(component, "get_gameObject", 0), instance, NULL);
+
+    /* same parent and local placement as her model */
+    void *parent = invoke(method(transform, "get_parent", 0), ot, NULL);
+    uint8_t keep = 0;
+    void *sp[] = { parent, &keep };
+    invoke(method(transform, "SetParent", 2), vt, sp);
+    const char *props[][2] = { { "get_localPosition", "set_localPosition" }, { "get_localRotation", "set_localRotation" },
+                               { "get_localScale", "set_localScale" } };
+    for (int i = 0; i < 3; ++i) {
+        void *v = invoke(method(transform, props[i][0], 0), ot, NULL);
+        if (!v) continue;
+        float *q = il_object_unbox(v);
+        if (i == 1) {
+            /* VRM 1.0 models face +Z, the game's characters the other way: q * 180 degrees about Y */
+            float x = q[0], y = q[1], z = q[2], w = q[3];
+            q[0] = -z;
+            q[1] = w;
+            q[2] = x;
+            q[3] = -y;
+        }
+        void *a[] = { q };
+        invoke(method(transform, props[i][1], 1), vt, a);
+    }
+
+    /* her meshes are on the layer the character camera draws; use it for ours */
+    void *rs = children_of_type(orig, renderer);
+    uintptr_t nr = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
+    for (uintptr_t i = 0; i < nr; ++i) {
+        void *g = invoke(method(component, "get_gameObject", 0), ((void **)((char *)rs + 0x20))[i], NULL);
+        void *layer = invoke(method(go_class, "get_layer", 0), g, NULL);
+        char name[64];
+        to_ascii(invoke(method(ui.object, "get_name", 0), g, NULL), name, sizeof name);
+        void *mat = invoke(method(renderer, "get_sharedMaterial", 0), ((void **)((char *)rs + 0x20))[i], NULL);
+        void *sh = mat ? invoke(method(find_class("UnityEngine", "Material"), "get_shader", 0), mat, NULL) : NULL;
+        char sname[128] = "";
+        if (sh) to_ascii(invoke(method(find_class("UnityEngine", "Shader"), "get_name", 0), sh, NULL), sname, sizeof sname);
+        logf_("vrm: her renderer %s on layer %d, shader %s", name, layer ? *(int32_t *)il_object_unbox(layer) : -1, sname);
+    }
+    if (nr) {
+        void *g = invoke(method(component, "get_gameObject", 0), ((void **)((char *)rs + 0x20))[0], NULL);
+        void *layer = invoke(method(go_class, "get_layer", 0), g, NULL);
+        void *ts = children_of_type(instance, transform);
+        uintptr_t nt = ts ? *(uintptr_t *)((char *)ts + 0x18) : 0;
+        int l = layer ? *(int32_t *)il_object_unbox(layer) : 0;
+        for (uintptr_t i = 0; i < nt; ++i) {
+            void *tg = invoke(method(component, "get_gameObject", 0), ((void **)((char *)ts + 0x20))[i], NULL);
+            void *a[] = { &l };
+            invoke(method(go_class, "set_layer", 1), tg, a);
+        }
+        logf_("vrm: layer %d on %lu objects", l, (unsigned long)nt);
+    }
+
+    /* the game draws characters with its own lilToon build; MToon only casts a
+       shadow there. Move the VRM's materials over, keeping texture and color. */
+    void *shader_class = find_class("UnityEngine", "Shader"), *material_class = find_class("UnityEngine", "Material");
+    void *templ = NULL, *lil = NULL;
+    for (uintptr_t i = 0; i < nr && !templ; ++i) {
+        void *m = invoke(method(renderer, "get_sharedMaterial", 0), ((void **)((char *)rs + 0x20))[i], NULL);
+        void *sh = m ? invoke(method(material_class, "get_shader", 0), m, NULL) : NULL;
+        char sname[128] = "";
+        if (sh) to_ascii(invoke(method(shader_class, "get_name", 0), sh, NULL), sname, sizeof sname);
+        if (!strcmp(sname, "Hidden/lilToonEncryptable/lilToonOutline")) {
+            templ = m;
+            lil = sh;
+        }
+    }
+    void *vrs = children_of_type(instance, renderer);
+    uintptr_t nv = vrs ? *(uintptr_t *)((char *)vrs + 0x18) : 0;
+    int changed = 0;
+    for (uintptr_t i = 0; lil && i < nv; ++i) {
+        void *r = ((void **)((char *)vrs + 0x20))[i];
+        void *get = il_class_get_method_from_name(renderer, "get_materials", 0);
+        if (!get) get = il_class_get_method_from_name(renderer, "get_sharedMaterials", 0);
+        void *mats = invoke(get, r, NULL);
+        if (i == 0) logf_("vrm: %lu renderers, materials getter %p, array %p", (unsigned long)nv, get, mats);
+        uintptr_t nm = mats ? *(uintptr_t *)((char *)mats + 0x18) : 0;
+        for (uintptr_t j = 0; j < nm; ++j) {
+            void *m = ((void **)((char *)mats + 0x20))[j];
+            void *tex = invoke(method(material_class, "get_mainTexture", 0), m, NULL);
+            void *col = invoke(method(material_class, "get_color", 0), m, NULL);
+            float c[4] = { 1, 1, 1, 1 };
+            if (col) memcpy(c, il_object_unbox(col), sizeof c);
+            void *a[] = { lil };
+            invoke(method(material_class, "set_shader", 1), m, a);
+            void *tp[] = { templ };
+            if (GetFileAttributesA(RUN_DIR "dmhook.vrm-copyprops") != INVALID_FILE_ATTRIBUTES)
+                invoke(method(material_class, "CopyPropertiesFromMaterial", 1), m, tp);
+            /* her keys unscramble the game's own meshes; ours are not scrambled */
+            static const char *const fsig[] = { "System.String", "System.Single" };
+            float one = 1;
+            void *fa[] = { il_string_new("_IgnoreEncryption"), &one };
+            invoke(method_typed(material_class, "SetFloat", 2, fsig), m, fa);
+            void *t[] = { tex };
+            invoke(method(material_class, "set_mainTexture", 1), m, t);
+            void *cc[] = { c };
+            invoke(method(material_class, "set_color", 1), m, cc);
+            changed++;
+        }
+    }
+    logf_("vrm: lilToon %p, %d materials moved", lil, changed);
+
+    if (stage < 2) return;
+    /* hide her meshes; her skeleton keeps running the game's animation, IK and colliders */
+    uint8_t off = 0;
+    for (uintptr_t i = 0; i < nr; ++i) {
+        void *a[] = { &off };
+        invoke(method(renderer, "set_enabled", 1), ((void **)((char *)rs + 0x20))[i], a);
+    }
+
+    if (stage < 3) return;
+    /* her pose -> the VRM, every frame */
+    static const char *const tsig[] = { "System.Type" };
+    void *add = method_typed(go_class, "AddComponent", 1, tsig);
+    void *ta[] = { il_type_get_object(il_class_get_type(pose)) };
+    void *src = invoke(add, og, ta);
+    void *dst = invoke(add, vg, ta);
+    if (!src || !dst) {
+        logf_("vrm: AddComponent failed (%p, %p)", src, dst);
+        return;
+    }
+    int from_transfer = 1; /* HumanPoseTransferSourceType: None, HumanPoseTransfer, HumanPoseClip */
+    set_field(dst, "Source", src); /* reference fields take the object itself */
+    set_field(dst, "SourceType", &from_transfer);
+    il_gchandle_new(src, 0);
+    il_gchandle_new(dst, 0);
+    g_pose_src = src;
+    g_pose_dst = dst;
+    logf_("vrm: attached, %lu renderers hidden", (unsigned long)nr);
+}
+
+static void *g_vrm_instance;
+
+static void describe_renderers(const char *what, void *comp)
+{
+    void *component = find_class("UnityEngine", "Component"), *renderer = find_class("UnityEngine", "Renderer");
+    void *go = find_class("UnityEngine", "GameObject"), *material = find_class("UnityEngine", "Material");
+    void *shader = find_class("UnityEngine", "Shader");
+    void *rs = children_of_type(comp, renderer);
+    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
+    logf_("%s: %lu renderers", what, (unsigned long)n);
+    for (uintptr_t i = 0; i < n && i < 6; ++i) {
+        void *r = ((void **)((char *)rs + 0x20))[i];
+        void *g = invoke(method(component, "get_gameObject", 0), r, NULL);
+        void *layer = invoke(method(go, "get_layer", 0), g, NULL);
+        void *b = invoke(method(renderer, "get_bounds", 0), r, NULL);
+        float *bv = b ? il_object_unbox(b) : NULL;
+        void *m = invoke(method(renderer, "get_sharedMaterial", 0), r, NULL);
+        void *sh = m ? invoke(method(material, "get_shader", 0), m, NULL) : NULL;
+        char name[64] = "", sname[96] = "";
+        to_ascii(invoke(method(ui.object, "get_name", 0), g, NULL), name, sizeof name);
+        if (sh) to_ascii(invoke(method(shader, "get_name", 0), sh, NULL), sname, sizeof sname);
+        logf_("  %s layer %d center (%.2f %.2f %.2f) size (%.2f %.2f %.2f) shader %s", name,
+              layer ? *(int *)il_object_unbox(layer) : -1, bv ? bv[0] : 0, bv ? bv[1] : 0, bv ? bv[2] : 0,
+              bv ? bv[3] * 2 : 0, bv ? bv[4] * 2 : 0, bv ? bv[5] * 2 : 0, sname);
+    }
+}
+
+static void vrm_diag(void)
+{
+    if (GetFileAttributesA(RUN_DIR "dmhook.vrmdiag") == INVALID_FILE_ATTRIBUTES) return;
+    DeleteFileA(RUN_DIR "dmhook.vrmdiag");
+    void *orig = find_character_animator();
+    if (orig) describe_renderers("character", orig);
+    if (g_vrm_instance) describe_renderers("vrm", g_vrm_instance);
+    void *behaviour = find_class("UnityEngine", "Behaviour");
+    for (int i = 0; i < 2; ++i) {
+        void *c = i ? g_pose_dst : g_pose_src;
+        if (!c) continue;
+        void *k = il_object_get_class(c), *v = NULL;
+        int type = -1;
+        void *f = il_class_get_field_from_name(k, "Avatar");
+        if (f) il_field_get_value(c, f, &v);
+        void *avatar = v;
+        v = NULL;
+        if ((f = il_class_get_field_from_name(k, "Source"))) il_field_get_value(c, f, &v);
+        if ((f = il_class_get_field_from_name(k, "SourceType"))) il_field_get_value(c, f, &type);
+        void *handler = NULL;
+        if ((f = il_class_get_field_from_name(k, "tgt"))) il_field_get_value(c, f, &handler);
+        void *en = invoke(method(behaviour, "get_enabled", 0), c, NULL);
+        void *ae = invoke(method(behaviour, "get_isActiveAndEnabled", 0), c, NULL);
+        logf_("pose %s: avatar %p, source %p, type %d, handler %p, enabled %d, active %d", i ? "dst" : "src", avatar, v,
+              type, handler, en ? *(uint8_t *)il_object_unbox(en) : -1, ae ? *(uint8_t *)il_object_unbox(ae) : -1);
+    }
+    void *camera = find_class("UnityEngine", "Camera"), *component = find_class("UnityEngine", "Component");
+    void *transform = find_class("UnityEngine", "Transform");
+    int none = 0;
+    void *args[] = { il_type_get_object(il_class_get_type(camera)), &none };
+    void *arr = invoke(ui.find_objects, NULL, args);
+    uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
+    for (uintptr_t i = 0; i < n; ++i) {
+        void *c = ((void **)((char *)arr + 0x20))[i];
+        char name[96];
+        to_ascii(invoke(method(ui.object, "get_name", 0), c, NULL), name, sizeof name);
+        void *mask = invoke(method(camera, "get_cullingMask", 0), c, NULL);
+        void *t = invoke(method(component, "get_transform", 0), c, NULL);
+        void *pos = t ? invoke(method(transform, "get_position", 0), t, NULL) : NULL;
+        float *pv = pos ? il_object_unbox(pos) : NULL;
+        logf_("camera %s: cullingMask %#x position (%.2f %.2f %.2f)", name, mask ? *(int *)il_object_unbox(mask) : -1,
+              pv ? pv[0] : 0, pv ? pv[1] : 0, pv ? pv[2] : 0);
+    }
+}
+
+static void vrm_request(void)
+{
+    vrm_diag();
+    if (g_vrm_task) {
+        void *k = il_object_get_class(g_vrm_task);
+        void *done = invoke(method(k, "get_IsCompleted", 0), g_vrm_task, NULL);
+        if (!done || !*(uint8_t *)il_object_unbox(done)) return;
+        void *faulted = invoke(method(k, "get_IsFaulted", 0), g_vrm_task, NULL);
+        if (faulted && *(uint8_t *)il_object_unbox(faulted)) {
+            char text[1024];
+            void *ex = invoke(method(k, "get_Exception", 0), g_vrm_task, NULL);
+            to_ascii(ex ? invoke(method(il_object_get_class(ex), "ToString", 0), ex, NULL) : NULL, text, sizeof text);
+            logf_("vrm: load failed: %s", text);
+        } else {
+            void *instance = invoke(method(k, "get_Result", 0), g_vrm_task, NULL);
+            logf_("vrm: loaded %p", instance);
+            if (instance) {
+                il_gchandle_new(instance, 0);
+                g_vrm_instance = instance;
+                vrm_attach(instance);
+            }
+        }
+        g_vrm_task = NULL;
+        return;
+    }
+    char path[512];
+    FILE *f = fopen(RUN_DIR "dmhook.vrm", "r");
+    if (!f) return;
+    if (!fgets(path, sizeof path, f)) path[0] = 0;
+    fclose(f);
+    DeleteFileA(RUN_DIR "dmhook.vrm");
+    path[strcspn(path, "\r\n")] = 0;
+    void *vrm10 = find_class("UniVRM10", "Vrm10"), *gen = find_class("UniVRM10", "UrpVrm10MaterialDescriptorGenerator");
+    if (!vrm10 || !gen) return;
+    void *material = NULL;
+    if (GetFileAttributesA(RUN_DIR "dmhook.vrm-urp") != INVALID_FILE_ATTRIBUTES) {
+        material = il_object_new(gen);
+        invoke(method(gen, ".ctor", 0), material, NULL);
+    }
+    uint8_t vrm0x = 1, show = 1;
+    int rig = 0; /* ControlRigGenerationOption.None */
+    uint64_t token = 0;
+    void *args[] = { il_string_new(path), &vrm0x, &rig, &show, NULL, material, NULL, NULL, &token };
+    g_vrm_task = invoke(method(vrm10, "LoadPathAsync", 9), NULL, args);
+    if (g_vrm_task) il_gchandle_new(g_vrm_task, 0);
+    logf_("vrm: loading %s, task %p", path, g_vrm_task);
+}
+
 /* runs on the game's main thread */
 static void tick(void)
 {
@@ -643,6 +1071,8 @@ static void tick(void)
     }
     if (ready < 0) return;
     dump_request();
+    inspect_request();
+    vrm_request();
     tick_bright();
 
     /* the game builds every page at start; rebuild ours if it ever goes away */
@@ -671,12 +1101,13 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     if (msg == WM_DMHOOK) {
-        /* only from the top-level message loop: a nested loop inside the game's
-           own code would run our managed calls in the middle of its */
-        static uintptr_t top;
-        uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-        if (!top || sp > top) top = sp;
-        if (top - sp <= 0x400) tick();
+        /* a message loop inside our own managed calls must not tick again */
+        static int busy;
+        if (!busy) {
+            busy = 1;
+            tick();
+            busy = 0;
+        }
         return 0;
     }
     return CallWindowProcW(g_prev_proc, hwnd, msg, wp, lp);
@@ -704,19 +1135,31 @@ static DWORD WINAPI worker(void *arg)
     DEVMODEW mode = { .dmSize = sizeof mode };
     g_drag_fps = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 60
                ? (int)mode.dmDisplayFrequency : 60;
-    g_prev_proc = (WNDPROC)SetWindowLongPtrW(game, GWLP_WNDPROC, (LONG_PTR)wndproc);
-    logf_("hooked game window %p, %d FPS while dragging", (void *)game, g_drag_fps);
+    logf_("%d FPS while dragging", g_drag_fps);
     /* window messages run on the main thread, where UI Toolkit may be used.
-       Mouse buttons only reach the game when pressed on the character. */
+       The game can recreate its window, so follow it. Mouse buttons only
+       reach the game when pressed on the character. */
+    HWND hooked = NULL;
     int held = 0;
-    for (DWORD waited = 0; IsWindow(game); waited += DRAG_POLL) {
+    for (DWORD waited = 0;; waited += DRAG_POLL) {
+        /* the game's window plugin subclasses the window after us and calls
+           our procedure in turn, so only a new window needs hooking */
+        if (!hooked || !IsWindow(hooked)) {
+            if (!(game = FindWindowW(L"UnityWndClass", NULL))) {
+                Sleep(500);
+                continue;
+            }
+            g_prev_proc = (WNDPROC)SetWindowLongPtrW(game, GWLP_WNDPROC, (LONG_PTR)wndproc);
+            logf_("%s game window %p", hooked ? "re-hooked" : "hooked", (void *)game);
+            hooked = game;
+        }
         int now = GetAsyncKeyState(VK_LBUTTON) < 0;
         if (now != held && g_drag_fps > 60) {
             held = now;
-            PostMessageW(game, WM_DMHOOK, held ? 1 : 2, 0);
+            PostMessageW(hooked, WM_DMHOOK, held ? 1 : 2, 0);
         }
         if (waited >= TICK_MS) {
-            PostMessageW(game, WM_DMHOOK, 0, 0);
+            PostMessageW(hooked, WM_DMHOOK, 0, 0);
             waited = 0;
         }
         Sleep(DRAG_POLL);
