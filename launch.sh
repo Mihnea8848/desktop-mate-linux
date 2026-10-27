@@ -165,6 +165,15 @@ main() {
         log "using $DM_PROTON"
     fi
 
+    # Unity starts one job worker per CPU thread, and under Wine the idle ones
+    # spin: 19 workers cost 0.6 of a core. Two do the work at the same frame rate.
+    DM_UNITY_ARGS=${DM_UNITY_ARGS--job-worker-count 2}
+    if [ -n "$DM_UNITY_ARGS" ]; then
+        # shellcheck disable=SC2086 # split into separate arguments on purpose
+        set -- "$@" $DM_UNITY_ARGS
+        log "unity arguments: $DM_UNITY_ARGS"
+    fi
+
     # Unity's own log (the game turns it off in boot.config)
     if [ -n "$DM_UNITY_LOG" ] && [ "$DM_UNITY_LOG" != 0 ]; then
         set -- "$@" -logFile 'Z:\dev\shm\ghost-bridge\unity.log'

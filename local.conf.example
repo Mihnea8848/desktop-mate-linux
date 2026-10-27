@@ -21,6 +21,10 @@
 # Write Unity's own log to /dev/shm/ghost-bridge/unity.log (the game turns it off).
 #DM_UNITY_LOG=1
 
+# Extra Unity player arguments. The default limits Unity to two job worker
+# threads; with one per CPU thread the idle ones spin and cost CPU under Wine.
+#DM_UNITY_ARGS="-job-worker-count 2"
+
 # Do not add the Linux section to the game's settings page.
 #DM_HOOK=0
 
