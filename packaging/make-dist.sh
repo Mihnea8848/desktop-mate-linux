@@ -12,7 +12,7 @@ name=desktop-mate-linux-$tag
 rm -rf "dist/$name"
 mkdir -p "dist/$name/bin"
 cp -r bin/ghost.exe bin/ghost-bridged bin/dmhook.dll bin/tools "dist/$name/bin/"
-cp -r launch.sh install.sh desktop-mate-linux kwin patches scripts tools local.conf.example \
+cp -r launch.sh install.sh get.sh desktop-mate-linux kwin patches scripts tools local.conf.example \
     README.md CHANGELOG.md LICENSE "dist/$name/"
 find "dist/$name" -name __pycache__ -prune -exec rm -rf {} +
 echo "$tag" >"dist/$name/VERSION"

@@ -6,6 +6,8 @@
 #   setup [--tool NAME]  point Desktop Mate in Steam at this copy (Steam closed)
 #   remove               undo setup
 #   build-proton [DIR]   build the GE-Proton copy with smoother animation
+#   update               install a newer release (installs made by get.sh)
+#   uninstall            undo setup and remove an install made by get.sh
 #   version              print the installed version
 
 DIR="$(dirname "$(readlink -f "$0")")"
@@ -20,15 +22,30 @@ version() {
     fi
 }
 
-cmd=$1
+# get.sh installs into .../desktop-mate-linux/versions/<tag>
+user_install() {
+    case "$DIR" in */desktop-mate-linux/versions/*) return 0 ;; esac
+    if [ -d /opt/desktop-mate-linux ] && [ "$DIR" = /opt/desktop-mate-linux ]; then
+        echo "This copy is installed by pacman: $1" >&2
+    else
+        echo "This copy was not installed by get.sh; $1" >&2
+    fi
+    return 1
+}
+
+cmd=${1:-}
 [ $# -gt 0 ] && shift
 case "$cmd" in
     setup) exec "$DIR/install.sh" "$@" ;;
     remove) exec "$DIR/install.sh" --remove ;;
     build-proton) exec "$DIR/tools/build-ge-proton.sh" "$@" ;;
+    update) user_install "update it with your package manager, or with git pull and build.sh" &&
+        exec "$DIR/get.sh" --update ;;
+    uninstall) user_install "run \"desktop-mate-linux remove\", then remove the package or folder" &&
+        exec "$DIR/get.sh" --uninstall ;;
     version) version ;;
     *)
-        sed -n '5,9s/^# \{0,1\}//p' "$0"
+        sed -n '5,11s/^# \{0,1\}//p' "$0"
         [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = --help ] || exit 1
         ;;
 esac

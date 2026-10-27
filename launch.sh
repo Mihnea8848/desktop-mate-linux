@@ -132,6 +132,18 @@ main() {
     XSCALE=${XSCALE:-1}
     env_summary
 
+    # installs from get.sh update themselves, at most once a day; the new
+    # version applies at the next start
+    case "$DIR" in
+        */desktop-mate-linux/versions/*)
+            stamp=${XDG_CACHE_HOME:-$HOME/.cache}/desktop-mate-linux/update-check
+            if [ "${DM_UPDATE:-on}" != off ] && [ -z "$(find "$stamp" -mmin -1440 2>/dev/null)" ]; then
+                mkdir -p "${stamp%/*}" && touch "$stamp"
+                env -u LD_PRELOAD -u LD_LIBRARY_PATH sh "$DIR/get.sh" --update >>"$LOG" 2>&1 &
+            fi
+            ;;
+    esac
+
     python3 -I "$DIR/scripts/ensure-prefix.py" >>"$LOG" 2>&1
     # real names of the game's renamed il2cpp exports, for dmhook.dll
     rm -f "$RUN/il2cpp-map.txt"
