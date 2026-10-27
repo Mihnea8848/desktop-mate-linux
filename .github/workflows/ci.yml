@@ -17,7 +17,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel clang lld llvm \
             mingw-w64-headers mingw-w64-crt systemd shellcheck python nodejs git
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: ./build.sh
       - name: Lint shell scripts
