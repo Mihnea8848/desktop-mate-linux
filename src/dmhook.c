@@ -979,13 +979,43 @@ static void vrm_attach(void *instance)
         if (!lil_transparent && !strcmp(sname, "Hidden/lilToonEncryptable/lilToonTransparentOutline")) lil_transparent = sh;
     }
     if (!lil_transparent) lil_transparent = lil;
-    /* no outline: her width and color depend on her own textures and drew
-       thick shells over the VRM's face. Her material is not copied, it holds
-       the keys that unscramble the game's meshes. */
-    static const char *const fset[] = { "System.String", "System.Single" };
-    float outline_width = 0;
     void *vrs = children_of_type(instance, renderer);
     uintptr_t nv = vrs ? *(uintptr_t *)((char *)vrs + 0x18) : 0;
+    /* the game ships its own MToon for VRM models; it keeps all MToon settings */
+    void *dm_mtoon = NULL;
+    {
+        void *res = find_class("UnityEngine", "Resources");
+        static const char *const tsig2[] = { "System.Type" };
+        void *ta[] = { il_type_get_object(il_class_get_type(shader_class)) };
+        void *all = invoke(method_typed(res, "FindObjectsOfTypeAll", 1, tsig2), NULL, ta);
+        uintptr_t na = all ? *(uintptr_t *)((char *)all + 0x18) : 0;
+        for (uintptr_t i = 0; i < na && !dm_mtoon; ++i) {
+            void *sh = ((void **)((char *)all + 0x20))[i];
+            char sname[128];
+            to_ascii(invoke(method(shader_class, "get_name", 0), sh, NULL), sname, sizeof sname);
+            if (!strcmp(sname, "Hidden/DesktopMate MToon")) dm_mtoon = sh;
+        }
+    }
+    if (dm_mtoon && GetFileAttributesA(RUN_DIR "dmhook.vrm-liltoon") == INVALID_FILE_ATTRIBUTES) {
+        int moved = 0;
+        for (uintptr_t i = 0; i < nv; ++i) {
+            void *mats = invoke(method(renderer, "get_sharedMaterials", 0), ((void **)((char *)vrs + 0x20))[i], NULL);
+            uintptr_t nm = mats ? *(uintptr_t *)((char *)mats + 0x18) : 0;
+            for (uintptr_t j = 0; j < nm; ++j) {
+                void *m = ((void **)((char *)mats + 0x20))[j];
+                int queue = unbox_int(invoke(method(material_class, "get_renderQueue", 0), m, NULL));
+                void *a[] = { dm_mtoon };
+                invoke(method(material_class, "set_shader", 1), m, a);
+                void *q[] = { &queue };
+                invoke(method(material_class, "set_renderQueue", 1), m, q);
+                moved++;
+            }
+        }
+        logf_("vrm: %d materials on Hidden/DesktopMate MToon", moved);
+        lil = NULL;
+    }
+    static const char *const fset[] = { "System.String", "System.Single" };
+    float outline_width = 0;
     int changed = 0;
     for (uintptr_t i = 0; lil && i < nv; ++i) {
         void *r = ((void **)((char *)vrs + 0x20))[i];
@@ -997,6 +1027,12 @@ static void vrm_attach(void *instance)
         for (uintptr_t j = 0; j < nm; ++j) {
             void *m = ((void **)((char *)mats + 0x20))[j];
             int queue = unbox_int(invoke(method(material_class, "get_renderQueue", 0), m, NULL));
+            /* MToon keeps its culling in _M_CullMode (0 off, 1 front, 2 back), lilToon in _Cull */
+            static const char *const fget[] = { "System.String" };
+            void *gm = method_typed(material_class, "GetFloat", 1, fget);
+            void *ca[] = { il_string_new("_M_CullMode") };
+            void *cr = invoke(gm, m, ca);
+            float cull = cr ? *(float *)il_object_unbox(cr) : 2;
             void *tex = invoke(method(material_class, "get_mainTexture", 0), m, NULL);
             void *col = invoke(method(material_class, "get_color", 0), m, NULL);
             float c[4] = { 1, 1, 1, 1 };
@@ -1013,6 +1049,14 @@ static void vrm_attach(void *instance)
             invoke(method(material_class, "set_color", 1), m, cc);
             void *ow[] = { il_string_new("_OutlineWidth"), &outline_width };
             invoke(method_typed(material_class, "SetFloat", 2, fset), m, ow);
+            void *la[] = { il_string_new("_Cull") };
+            void *lr = invoke(gm, m, la);
+            char mname[64];
+            to_ascii(invoke(method(ui.object, "get_name", 0), m, NULL), mname, sizeof mname);
+            logf_("vrm: material %s queue %d, MToon cull %.0f, lilToon cull was %.0f", mname, queue, cull,
+                  lr ? *(float *)il_object_unbox(lr) : -1);
+            void *cw[] = { il_string_new("_Cull"), &cull };
+            invoke(method_typed(material_class, "SetFloat", 2, fset), m, cw);
             if (queue >= 2450) {
                 void *q[] = { &queue };
                 invoke(method(material_class, "set_renderQueue", 1), m, q);
