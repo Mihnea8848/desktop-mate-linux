@@ -101,7 +101,16 @@ game's check boxes are images with the caption baked in. Changes are saved to
 away. While the character is dragged (the left button is held; clicks only
 reach the game on the character), the library raises the frame rate to the
 screen's refresh rate so she keeps up with the pointer, and sets it back to 60
-on release. If anything is not found after a game update, the library writes the
+on release.
+
+The brightness slider at the bottom of Character Settings scales the
+intensity of the scene's directional light, which is what the characters'
+MToon shading reacts to, between 25% and 150%. The value is kept per
+character (the game's `CharacterSlot/0` player preference) in
+`brightness.conf` next to `game.conf`, and applied again when the character
+changes or the game creates a new light. The characters are not brighter
+than on Windows: compared with the store screenshots, colors match within the
+differences that pose and JPEG compression explain. If anything is not found after a game update, the library writes the
 reason to `dmhook.log` and does nothing else.
 
 ## Smooth animation
