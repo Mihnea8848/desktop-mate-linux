@@ -6,6 +6,7 @@
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dwmapi.h>
 #include <stdio.h>
 
 static BOOL CALLBACK print_window(HWND h, LPARAM lp)
@@ -16,8 +17,16 @@ static BOOL CALLBACK print_window(HWND h, LPARAM lp)
     GetClassNameA(h, cls, sizeof cls);
     GetWindowTextA(h, title, sizeof title);
     GetWindowRect(h, &r);
-    printf("%p vis=%d icon=%d style=%08lx ex=%08lx rect=%ld,%ld %ldx%ld cls='%s' title='%s'\n",
-           (void *)h, IsWindowVisible(h), IsIconic(h),
+    DWORD cloaked = 0;
+    HRESULT hr = DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof cloaked);
+    RECT rgn = {0}, efb = {0};
+    int rt = GetWindowRgnBox(h, &rgn);
+    HRESULT he = DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &efb, sizeof efb);
+    WINDOWPLACEMENT wp = { sizeof wp };
+    GetWindowPlacement(h, &wp);
+    printf("%p vis=%d icon=%d cloaked=%lu(hr=%08lx) rgn=%d efb=%ld,%ld %ldx%ld(hr=%08lx) show=%u style=%08lx ex=%08lx rect=%ld,%ld %ldx%ld cls='%s' title='%s'\n",
+           (void *)h, IsWindowVisible(h), IsIconic(h), cloaked, (unsigned long)hr, rt,
+           efb.left, efb.top, efb.right - efb.left, efb.bottom - efb.top, (unsigned long)he, wp.showCmd,
            GetWindowLongA(h, GWL_STYLE), GetWindowLongA(h, GWL_EXSTYLE),
            r.left, r.top, r.right - r.left, r.bottom - r.top, cls, title);
     return TRUE;

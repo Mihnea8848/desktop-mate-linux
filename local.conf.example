@@ -9,5 +9,9 @@
 # Use another Proton build than the one selected in Steam.
 #DM_PROTON="$HOME/.local/share/Steam/compatibilitytools.d/Proton-GE Latest"
 
+# Keep the click-through flag on the game window (default 1). Needed with
+# GE-Proton 11-7 and newer, or the character cannot attach to windows.
+#DM_GAME_TRANSPARENT=0
+
 # Start the game without the window bridge.
 #DM_NO_BRIDGE=1
