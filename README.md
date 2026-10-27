@@ -42,6 +42,9 @@ Expect rough edges. Reports from other setups are welcome.
 - CPU use is high. See [Performance](#performance).
 - "Launch at startup" in the game's settings has no effect on Linux.
 - Only KDE Plasma is supported, because the window list comes from a KWin script.
+- Steam installed as a Flatpak is untested. `launch.sh` would run inside the
+  Flatpak sandbox, where `qdbus6` is usually missing; in that case the game
+  starts without the window bridge and `launch.log` says so.
 
 ## Requirements
 
@@ -185,6 +188,14 @@ If the character renders on a black rectangle, the game is not running with a
 GE-Proton build that has the overlay patch. If she is blurry and the click
 areas are offset, the prefix setting from step 4 of the installation is
 missing.
+
+If the title bars of all windows disappear while the game runs, a KWin window
+rule that matches the game (`steam_app_3301060`) was changed or reloaded. KWin
+tries to move the unmanaged game window and stops drawing decorations. Quitting
+the game restores them. Do not add KWin rules for the game.
+
+`ghost.exe` is restarted automatically (up to three times) if it stops while
+the game is running. `launch.log` lists each start.
 
 ## Roadmap
 

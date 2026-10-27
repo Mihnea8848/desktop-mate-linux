@@ -4,55 +4,25 @@
 #
 # Steam launch options: /path/to/desktop-mate-linux/launch.sh %command%
 # Settings: environment variables or local.conf, see local.conf.example.
-
-DIR="$(dirname "$(readlink -f "$0")")"
-# shellcheck source=/dev/null
-[ -f "$DIR/local.conf" ] && . "$DIR/local.conf"
+#
+# Everything runs inside main(), so the shell has read the whole file before
+# the game starts and the file can be replaced while the game runs.
 
 RUN=/dev/shm/ghost-bridge
 LOG=$RUN/launch.log
-mkdir -p "$RUN/cmd"
-rm -f "$RUN"/cmd/* "$RUN/windows.tsv"
-echo "launch $(date '+%F %T')" >"$LOG"
+GAME_RE='^[A-Z]:.*\\DesktopMate\.exe'
+GHOST_RE='^[A-Z]:.*\\ghost\.exe'
 
-python3 -I "$DIR/scripts/ensure-prefix.py" >>"$LOG" 2>&1
+log() { echo "$*" >>"$LOG"; }
 
-# GE-Proton layered overlay patch: ARGB window, click-through shape from alpha
-export WINE_LAYERED_OVERLAY_ALPHA=1
-export WINE_LAYERED_OVERLAY_SHAPE_INTERVAL="${DM_SHAPE_INTERVAL:-100}"
-
-FPS=${DM_FPS:-60}
-if [ "$FPS" != 0 ]; then
-    export DXVK_FRAME_RATE="$FPS" VKD3D_FRAME_RATE="$FPS"
-fi
-
-if [ -n "$DM_PROTON" ] && [ -x "$DM_PROTON/proton" ]; then
-    n=$#
-    while [ $n -gt 0 ]; do
-        a=$1; shift; n=$((n - 1))
-        case "$a" in */proton) a=$DM_PROTON/proton ;; esac
-        set -- "$@" "$a"
-    done
-    echo "using $DM_PROTON" >>"$LOG"
-fi
-
-PROTON=
-for a in "$@"; do
-    case "$a" in */proton) PROTON=$a; break ;; esac
-done
-
-QDBUS=$(command -v qdbus6 || command -v qdbus-qt6 || command -v qdbus)
-
-BRIDGE=1
-if [ -n "$DM_NO_BRIDGE" ]; then
-    BRIDGE=
-elif [ ! -x "$DIR/bin/ghost-bridged" ] || [ ! -f "$DIR/bin/ghost.exe" ]; then
-    echo "bridge not built, run build.sh; starting without it" >>"$LOG"
-    BRIDGE=
-elif [ -z "$QDBUS" ] || [ -z "$PROTON" ]; then
-    echo "qdbus or proton not found; starting without the bridge" >>"$LOG"
-    BRIDGE=
-fi
+env_summary() {
+    log "session: ${XDG_SESSION_TYPE:-?} ${XDG_CURRENT_DESKTOP:-?}"
+    command -v plasmashell >/dev/null && log "$(env -u LD_LIBRARY_PATH -u LD_PRELOAD plasmashell --version 2>&1 | head -n 1)"
+    command -v nvidia-smi >/dev/null &&
+        log "gpu: $(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -n 1)"
+    log "xwayland scale: $XSCALE"
+    [ -f /.flatpak-info ] && log "running inside Flatpak: the bridge needs qdbus and /dev/shm from the host"
+}
 
 kwin_script() {
     method=$1
@@ -60,38 +30,134 @@ kwin_script() {
     "$QDBUS" org.kde.KWin /Scripting "org.kde.kwin.Scripting.$method" "$@"
 }
 
-DPID='' WPID=''
-if [ -n "$BRIDGE" ]; then
-    "$DIR/bin/ghost-bridged" >>"$LOG" 2>&1 &
-    DPID=$!
+game_running() { pgrep -f "$GAME_RE" >/dev/null; }
+ghost_running() { pgrep -f "$GHOST_RE" >/dev/null; }
 
-    kwin_script unloadScript ghostbridge >/dev/null 2>&1
-    kwin_script loadScript "$DIR/kwin/ghost-bridge.js" ghostbridge >>"$LOG" 2>&1
-    kwin_script start >>"$LOG" 2>&1
+stop_tree() {
+    for c in $(pgrep -P "$1"); do
+        stop_tree "$c"
+    done
+    kill "$1" 2>/dev/null
+}
 
-    # ghost.exe needs the game's wineserver; it exits when the game exits
-    (
-        i=0
-        until pgrep -f '^[A-Z]:.*\\DesktopMate\.exe' >/dev/null; do
-            i=$((i + 1))
-            [ $i -gt 120 ] && exit 0
-            sleep 1
-        done
-        sleep 3
-        echo "starting ghost.exe via $PROTON"
+# Starts ghost.exe once the game runs and restarts it (up to 3 times) when it
+# disappears while the game still runs. The ghost.exe process itself is
+# watched: Proton's "run" wrapper does not always exit when ghost.exe dies.
+supervise_ghost() {
+    i=0
+    until game_running; do
+        i=$((i + 1))
+        [ $i -gt 120 ] && return
+        sleep 1
+    done
+    sleep 3
+    tries=0
+    while game_running && [ $tries -lt 4 ]; do
+        tries=$((tries + 1))
+        echo "starting ghost.exe via $PROTON (try $tries)"
         WINE_LAYERED_OVERLAY_ALPHA='' WINE_LAYERED_OVERLAY_SHAPE_INTERVAL='' \
-        DXVK_FRAME_RATE='' VKD3D_FRAME_RATE='' WINEDEBUG=-all \
-            python3 "$PROTON" run "$DIR/bin/ghost.exe" </dev/null
+        DXVK_FRAME_RATE='' VKD3D_FRAME_RATE='' WINEDEBUG=-all GHOST_SCALE="$XSCALE" \
+            python3 "$PROTON" run "$DIR/bin/ghost.exe" </dev/null &
+        runner=$!
+        seen=0 missing=0
+        while game_running; do
+            sleep 2
+            if ghost_running; then
+                seen=1 missing=0
+            else
+                missing=$((missing + 1))
+            fi
+            [ $seen = 1 ] && [ $missing -ge 2 ] && break
+            [ $seen = 0 ] && [ $missing -ge 15 ] && break
+        done
+        stop_tree "$runner"
         echo "ghost.exe ended"
-    ) >>"$LOG" 2>&1 &
-    WPID=$!
-fi
+    done
+}
 
-"$@"
-RC=$?
+# shellcheck disable=SC2329 # called by the EXIT trap
+cleanup() {
+    trap - EXIT INT TERM HUP
+    if [ -n "$BRIDGE" ]; then
+        kwin_script unloadScript ghostbridge >/dev/null 2>&1
+        [ -n "$WPID" ] && kill "$WPID" 2>/dev/null
+        [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
+    fi
+    log "exit $(date '+%F %T')"
+}
 
-if [ -n "$BRIDGE" ]; then
-    kwin_script unloadScript ghostbridge >/dev/null 2>&1
-    kill "$DPID" "$WPID" 2>/dev/null
-fi
-exit $RC
+main() {
+    DIR="$(dirname "$(readlink -f "$0")")"
+    # shellcheck source=/dev/null
+    [ -f "$DIR/local.conf" ] && . "$DIR/local.conf"
+
+    mkdir -p "$RUN/cmd"
+    rm -f "$RUN"/cmd/* "$RUN/windows.tsv"
+    echo "launch $(date '+%F %T')" >"$LOG"
+
+    XSCALE=$(kreadconfig6 --file kwinrc --group Xwayland --key Scale 2>/dev/null)
+    XSCALE=${XSCALE:-1}
+    env_summary
+
+    python3 -I "$DIR/scripts/ensure-prefix.py" >>"$LOG" 2>&1
+
+    # GE-Proton layered overlay patch: ARGB window, click-through shape from alpha
+    export WINE_LAYERED_OVERLAY_ALPHA=1
+    export WINE_LAYERED_OVERLAY_SHAPE_INTERVAL="${DM_SHAPE_INTERVAL:-100}"
+
+    FPS=${DM_FPS:-60}
+    if [ "$FPS" != 0 ]; then
+        export DXVK_FRAME_RATE="$FPS" VKD3D_FRAME_RATE="$FPS"
+    fi
+
+    if [ -n "$DM_PROTON" ] && [ -x "$DM_PROTON/proton" ]; then
+        n=$#
+        while [ $n -gt 0 ]; do
+            a=$1
+            shift
+            n=$((n - 1))
+            case "$a" in */proton) a=$DM_PROTON/proton ;; esac
+            set -- "$@" "$a"
+        done
+        log "using $DM_PROTON"
+    fi
+
+    PROTON=''
+    for a in "$@"; do
+        case "$a" in */proton) PROTON=$a; break ;; esac
+    done
+    log "proton: ${PROTON:-none}"
+
+    QDBUS=$(command -v qdbus6 || command -v qdbus-qt6 || command -v qdbus)
+
+    BRIDGE=1
+    if [ -n "$DM_NO_BRIDGE" ]; then
+        BRIDGE=''
+    elif [ ! -x "$DIR/bin/ghost-bridged" ] || [ ! -f "$DIR/bin/ghost.exe" ]; then
+        log "bridge not built, run build.sh; starting without it"
+        BRIDGE=''
+    elif [ -z "$QDBUS" ] || [ -z "$PROTON" ]; then
+        log "qdbus or proton not found; starting without the bridge"
+        BRIDGE=''
+    fi
+
+    DPID='' WPID=''
+    trap cleanup EXIT
+    trap 'exit 143' INT TERM HUP
+
+    if [ -n "$BRIDGE" ]; then
+        "$DIR/bin/ghost-bridged" >>"$LOG" 2>&1 &
+        DPID=$!
+        kwin_script unloadScript ghostbridge >/dev/null 2>&1
+        kwin_script loadScript "$DIR/kwin/ghost-bridge.js" ghostbridge >/dev/null 2>>"$LOG"
+        kwin_script start >/dev/null 2>>"$LOG"
+        supervise_ghost >>"$LOG" 2>&1 &
+        WPID=$!
+    fi
+
+    "$@"
+    return $?
+}
+
+main "$@"
+exit

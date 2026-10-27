@@ -11,6 +11,7 @@
  * mirrors, and each mirror has an empty window region so it is never drawn.
  *
  * Env: GHOST_NO_WRITEBACK=1 disables the command channel.
+ *      GHOST_SCALE=<n> Xwayland scale; KWin rects are multiplied by it.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -26,6 +27,7 @@
 #define POLL_MS       50
 #define HOLD_MS       400   /* ignore snapshot geometry this long after the game moved a mirror */
 #define GAME_WAIT_MS  180000
+#define LOG_MAX       (1024 * 1024)
 
 #ifndef EVENT_SYSTEM_FOREGROUND
 #define EVENT_SYSTEM_FOREGROUND     0x0003
@@ -54,14 +56,21 @@ static int      g_writeback = 1;
 static DWORD    g_style, g_exstyle;
 static FILE    *g_log;
 static unsigned g_cmdseq;
+static double   g_scale = 1.0;
+static long     g_logsize;
 
 static void logf_(const char *fmt, ...)
 {
     if (!g_log) return;
+    if (g_logsize > LOG_MAX) {
+        g_log = freopen(LOG_PATH, "w", g_log);
+        g_logsize = 0;
+        if (!g_log) return;
+    }
     va_list ap;
     va_start(ap, fmt);
-    fprintf(g_log, "%lu ", (unsigned long)GetTickCount());
-    vfprintf(g_log, fmt, ap);
+    g_logsize += fprintf(g_log, "%lu ", (unsigned long)GetTickCount());
+    g_logsize += vfprintf(g_log, fmt, ap);
     fputc('\n', g_log);
     fflush(g_log);
     va_end(ap);
@@ -127,7 +136,9 @@ static void on_moved(HWND h, const WINDOWPOS *wpos)
     g->x = x; g->y = y; g->w = w; g->h = hh;
     g->hold_until = GetTickCount() + HOLD_MS;
     char line[160];
-    snprintf(line, sizeof line, "move\t%s\t%d\t%d\t%d\t%d", g->id, x, y, w, hh);
+    snprintf(line, sizeof line, "move\t%s\t%d\t%d\t%d\t%d", g->id,
+             (int)(x / g_scale + 0.5), (int)(y / g_scale + 0.5),
+             (int)(w / g_scale + 0.5), (int)(hh / g_scale + 0.5));
     send_cmd(line);
 }
 
@@ -188,7 +199,10 @@ static int parse_snapshot(char *buf, Rec *recs, int max)
         if (!id || !kind || n >= max) continue;
         Rec *r = &recs[n];
         memset(r, 0, sizeof *r);
-        r->x = atoi(xs); r->y = atoi(ys); r->w = atoi(ws); r->h = atoi(hs);
+        r->x = (int)(atoi(xs) * g_scale + 0.5);
+        r->y = (int)(atoi(ys) * g_scale + 0.5);
+        r->w = (int)(atoi(ws) * g_scale + 0.5);
+        r->h = (int)(atoi(hs) * g_scale + 0.5);
         if (r->w <= 0 || r->h <= 0) continue;
         strncpy(r->id, id, sizeof r->id - 1);
         r->dock = !strcmp(kind, "dock");
@@ -373,6 +387,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     g_log = fopen(LOG_PATH, "w");
     CreateDirectoryA(CMD_DIR, NULL);
     if (getenv("GHOST_NO_WRITEBACK")) g_writeback = 0;
+    if (getenv("GHOST_SCALE") && atof(getenv("GHOST_SCALE")) > 0) g_scale = atof(getenv("GHOST_SCALE"));
 
     /* styles of an ordinary application window */
     g_style   = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPSIBLINGS;
@@ -385,7 +400,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     wc.lpszClassName = L"Shell_TrayWnd";          RegisterClassW(&wc);
     wc.lpszClassName = L"Shell_SecondaryTrayWnd"; RegisterClassW(&wc);
 
-    logf_("start pid=%lu writeback=%d", (unsigned long)GetCurrentProcessId(), g_writeback);
+    logf_("start pid=%lu writeback=%d scale=%.2f", (unsigned long)GetCurrentProcessId(), g_writeback, g_scale);
     SetTimer(NULL, 1, POLL_MS, NULL);
 
     /* exit with the game, otherwise Proton and Steam consider it still running */

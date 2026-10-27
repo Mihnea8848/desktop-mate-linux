@@ -157,6 +157,15 @@ static const sd_bus_vtable vtable[] = {
     SD_BUS_VTABLE_END
 };
 
+/* a newer instance took over the name: this one is stale */
+static int on_name_lost(sd_bus_message *m, void *ud, sd_bus_error *err)
+{
+    (void)m; (void)ud; (void)err;
+    fprintf(stderr, "ghost-bridged: replaced by a newer instance, exiting\n");
+    sd_event_exit(g_event, 0);
+    return 0;
+}
+
 int main(void)
 {
     sd_bus *bus = NULL;
@@ -166,8 +175,11 @@ int main(void)
 
     if (sd_event_default(&g_event) < 0 || sd_bus_open_user(&bus) < 0) return 1;
     if (sd_bus_add_object_vtable(bus, NULL, "/", "org.ghostbridge", vtable, NULL) < 0) return 1;
-    if (sd_bus_request_name(bus, "org.ghostbridge", 0) < 0) {
-        fprintf(stderr, "ghost-bridged: org.ghostbridge is already owned\n");
+    if (sd_bus_match_signal(bus, NULL, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                            "org.freedesktop.DBus", "NameLost", on_name_lost, NULL) < 0) return 1;
+    if (sd_bus_request_name(bus, "org.ghostbridge",
+                            SD_BUS_NAME_ALLOW_REPLACEMENT | SD_BUS_NAME_REPLACE_EXISTING) < 0) {
+        fprintf(stderr, "ghost-bridged: cannot own org.ghostbridge\n");
         return 1;
     }
     if (sd_bus_attach_event(bus, g_event, 0) < 0) return 1;
