@@ -17,9 +17,11 @@
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define RUN_DIR   "Z:\\dev\\shm\\ghost-bridge\\"
@@ -125,6 +127,7 @@ static int32_t (*il_string_length)(void *);
 static void *(*il_class_get_field_from_name)(void *, const char *);
 static void (*il_field_get_value)(void *, void *, void *);
 static uint32_t (*il_gchandle_new)(void *, int);
+static void (*il_gchandle_free)(uint32_t);
 static void *(*il_class_get_methods)(void *, void **);
 static const char *(*il_method_get_name)(void *);
 static uint32_t (*il_method_get_param_count)(void *);
@@ -145,7 +148,7 @@ static int resolve_api(void)
     R(class_get_method_from_name) R(class_get_name) R(class_get_type) R(type_get_object)
     R(object_get_class) R(object_unbox) R(object_new) R(runtime_invoke) R(string_new)
     R(string_chars) R(string_length) R(class_get_field_from_name) R(field_get_value)
-    R(gchandle_new) R(class_get_methods) R(method_get_name) R(method_get_param_count)
+    R(gchandle_new) R(gchandle_free) R(class_get_methods) R(method_get_name) R(method_get_param_count)
     R(method_get_param) R(method_get_return_type) R(method_get_flags) R(type_get_name) R(class_get_parent)
     R(class_get_fields) R(field_get_name) R(field_get_type) R(field_set_value)
 #undef R
@@ -275,6 +278,7 @@ static void *find_in_documents(const char *name)
     return NULL;
 }
 
+static int g_dump_depth = 12;
 static void dump(void *e, int depth)
 {
     char name[128], cls[512] = "", text[160] = "";
@@ -292,7 +296,7 @@ static void dump(void *e, int depth)
     }
     if (il_class_get_field_from_name(k, "m_Text")) to_ascii(field_obj(e, "m_Text"), text, sizeof text);
     logf_("%*s%s [%s] .%s \"%s\"", depth * 2, "", name, il_class_get_name(k), cls, text);
-    if (depth < 12)
+    if (depth < g_dump_depth)
         for (int i = 0, c = unbox_int(invoke(ui.child_count, e, NULL)); i < c; ++i) dump(element_at(e, i), depth + 1);
 }
 
@@ -301,9 +305,26 @@ static void dump_request(void)
     char name[128];
     FILE *f = fopen(DUMP_PATH, "r");
     if (!f) return;
+    /* "NAME [DEPTH]"; NAME * dumps every document */
     int ok = fscanf(f, "%127s", name) == 1;
+    if (fscanf(f, "%d", &g_dump_depth) != 1) g_dump_depth = 12;
     fclose(f);
     DeleteFileA(DUMP_PATH);
+    if (ok && !strcmp(name, "*")) {
+        int none = 0;
+        void *args[] = { il_type_get_object(il_class_get_type(ui.document)), &none };
+        void *docs = invoke(ui.find_objects, NULL, args);
+        uintptr_t len = docs ? *(uintptr_t *)((char *)docs + 0x18) : 0;
+        for (uintptr_t i = 0; i < len; ++i) {
+            void *d = ((void **)((char *)docs + 0x20))[i];
+            char dn[96];
+            to_ascii(invoke(method(ui.object, "get_name", 0), d, NULL), dn, sizeof dn);
+            logf_("document %s", dn);
+            void *root = invoke(ui.root, d, NULL);
+            if (root) dump(root, 1);
+        }
+        return;
+    }
     void *e = ok ? find_in_documents(name) : NULL;
     if (e) dump(e, 0);
     else logf_("dump: %s not found", name);
@@ -366,6 +387,20 @@ static void style_color(void *e, const char *prop, float r, float g, float b, fl
 {
     struct { float r, g, b, a; int32_t keyword; } c = { r, g, b, a, 0 };
     style_set(e, prop, &c);
+}
+
+/* StyleEnum: DisplayStyle, Visibility, TextAnchor, FontStyle */
+static void style_enum(void *e, const char *prop, int v)
+{
+    struct { int32_t v, keyword; } x = { v, 0 };
+    style_set(e, prop, &x);
+}
+
+static void label_style(void *label, float size, int bold, float alpha)
+{
+    style_color(label, "color", 1, 1, 1, alpha);
+    style_px(label, "fontSize", size);
+    style_enum(label, "unityFontStyleAndWeight", bold);
 }
 
 /* The game's checkboxes are per-toggle images with the caption baked in. Draw
@@ -742,8 +777,26 @@ static void inspect_request(void)
     char ns[96], cn[96];
     int listed = 0;
     while (fscanf(f, "%95s %95s", ns, cn) == 2) {
-        inspect_class(ns, cn);
         listed++;
+        if (strcmp(ns, "go")) {
+            inspect_class(ns, cn);
+            continue;
+        }
+        /* "go NAME": the classes of the components on that GameObject */
+        void *go_class = find_class("UnityEngine", "GameObject"), *component = find_class("UnityEngine", "Component");
+        void *na[] = { il_string_new(cn) };
+        void *go = invoke(method(go_class, "Find", 1), NULL, na);
+        static const char *const tsig[] = { "System.Type" };
+        void *ta[] = { il_type_get_object(il_class_get_type(component)) };
+        void *cs = go ? invoke(method_typed(go_class, "GetComponents", 1, tsig), go, ta) : NULL;
+        uintptr_t n = cs ? *(uintptr_t *)((char *)cs + 0x18) : 0;
+        logf_("gameobject %s: %p, %lu components", cn, go, (unsigned long)n);
+        for (uintptr_t i = 0; i < n; ++i) {
+            void *k = il_object_get_class(((void **)((char *)cs + 0x20))[i]);
+            logf_("component %s", il_class_get_name(k));
+            void *iter = NULL, *m;
+            while ((m = il_class_get_methods(k, &iter))) logf_("  %s/%u", il_method_get_name(m), il_method_get_param_count(m));
+        }
     }
     fclose(f);
     DeleteFileA(RUN_DIR "dmhook.inspect");
@@ -781,94 +834,48 @@ static const struct { const char *preset; const char *shapes[6]; } g_face_map[] 
     { "get_Relaxed", { "facial_bs.eye_downcast_geo_L", "facial_bs.eye_downcast_geo_R" } },
 };
 #define FACE_KEYS (int)(sizeof g_face_map / sizeof g_face_map[0])
-static struct { void *key; int shapes[6]; } g_face[FACE_KEYS];
-static void *g_face_mesh, *g_face_expression;
+static void *g_face_keys[FACE_KEYS];
 
-static void face_setup(void *orig, void *instance)
+/* A VRM worn by one of the characters out. Her skeleton keeps running the
+ * game's animation, IK and colliders; her meshes are hidden and the VRM
+ * follows her pose and face. */
+#define MAX_WORN 6
+struct worn {
+    char character[128], file[260];
+    void *her, *task, *instance, *go, *src, *face_mesh, *face_expression;
+    int shapes[FACE_KEYS][6], nhidden, nhandles;
+    int waiting; /* loaded, hidden, until her model exists */
+    int leaving; /* she was dismissed; the VRM stays until she is gone */
+    DWORD since;
+    struct { void *renderer; uint8_t enabled; } hidden[64];
+    uint32_t handles[256]; /* GC handles of everything above, freed with it */
+};
+static struct worn g_worn[MAX_WORN];
+static int g_watching; /* worn VRMs waiting for her or just put on: tick fast */
+static void bring_out(const char *id);
+static int g_faces; /* worn VRMs with a face to drive */
+
+static void *keep(struct worn *w, void *obj)
 {
-    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer"), *mesh_class = find_class("UnityEngine", "Mesh");
-    void *rs = children_of_type(orig, smr), *mesh = NULL;
-    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
-    for (uintptr_t i = 0; i < n && !g_face_mesh; ++i) {
-        void *r = ((void **)((char *)rs + 0x20))[i];
-        void *m = invoke(method(smr, "get_sharedMesh", 0), r, NULL);
-        if (m && unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), m, NULL)) > 0) {
-            g_face_mesh = r;
-            mesh = m;
-        }
-    }
-    void *vrm_instance = find_class("UniVRM10", "Vrm10Instance"), *runtime_class = find_class("UniVRM10", "Vrm10Runtime");
-    void *keys = find_class("UniVRM10", "ExpressionKey");
-    void *runtime = invoke(method(vrm_instance, "get_Runtime", 0), instance, NULL);
-    g_face_expression = runtime ? invoke(method(runtime_class, "get_Expression", 0), runtime, NULL) : NULL;
-    if (!g_face_mesh || !g_face_expression || !keys) {
-        logf_("face: mesh %p, expression %p", g_face_mesh, g_face_expression);
-        g_face_mesh = NULL;
-        return;
-    }
-    il_gchandle_new(g_face_mesh, 0);
-    il_gchandle_new(g_face_expression, 0);
-    int found = 0;
-    for (int k = 0; k < FACE_KEYS; ++k) {
-        g_face[k].key = invoke(method(keys, g_face_map[k].preset, 0), NULL, NULL);
-        if (g_face[k].key) il_gchandle_new(g_face[k].key, 0);
-        for (int j = 0; j < 6; ++j) {
-            g_face[k].shapes[j] = -1;
-            if (!g_face_map[k].shapes[j]) continue;
-            void *a[] = { il_string_new(g_face_map[k].shapes[j]) };
-            g_face[k].shapes[j] = unbox_int(invoke(method(mesh_class, "GetBlendShapeIndex", 1), mesh, a));
-            found += g_face[k].shapes[j] >= 0;
-        }
-    }
-    logf_("face: mirroring %d of her blendshapes onto %d expressions", found, FACE_KEYS);
+    if (obj && w->nhandles < 256) w->handles[w->nhandles++] = il_gchandle_new(obj, 0);
+    return obj;
 }
 
-static void face_tick(void)
+/* false once Unity destroyed the object behind obj */
+static int alive(void *obj)
 {
-    if (!g_face_mesh) return;
-    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
-    void *expr = find_class("UniVRM10", "Vrm10RuntimeExpression");
-    static void *get_weight, *set_weight;
-    if (!get_weight) get_weight = method(smr, "GetBlendShapeWeight", 1);
-    if (!set_weight) set_weight = method(expr, "SetWeight", 2);
-    for (int k = 0; k < FACE_KEYS; ++k) {
-        if (!g_face[k].key) continue;
-        float w = 0;
-        for (int j = 0; j < 6; ++j) {
-            int i = g_face[k].shapes[j];
-            if (i < 0) continue;
-            void *a[] = { &i };
-            void *r = invoke(get_weight, g_face_mesh, a);
-            float v = r ? *(float *)il_object_unbox(r) / 100.0f : 0;
-            if (v > w) w = v;
-        }
-        if (w > 1) w = 1;
-        void *b[] = { il_object_unbox(g_face[k].key), &w };
-        invoke(set_weight, g_face_expression, b);
-        /* temporary: what the VRM reports back */
-        static float peak[FACE_KEYS];
-        void *c[] = { il_object_unbox(g_face[k].key) };
-        void *got = invoke(method(expr, "GetWeight", 1), g_face_expression, c);
-        float gv = got ? *(float *)il_object_unbox(got) : -1;
-        if (gv > peak[k]) peak[k] = gv;
-        static int ticks;
-        if (k == FACE_KEYS - 1 && ++ticks % 160 == 0) {
-            char line[512];
-            int o = 0;
-            for (int j = 0; j < FACE_KEYS; ++j) {
-                o += snprintf(line + o, sizeof line - o, " %s=%.2f", g_face_map[j].preset + 4, peak[j]);
-                peak[j] = 0;
-            }
-            logf_("face peaks:%s", line);
-        }
-    }
+    if (!obj) return 0;
+    void *a[] = { obj };
+    void *r = invoke(method(ui.object, "op_Implicit", 1), NULL, a);
+    return r && *(uint8_t *)il_object_unbox(r);
 }
 
-/* Custom character proof of concept: write a Windows path of a .vrm file to
- * /dev/shm/ghost-bridge/dmhook.vrm. The VRM is loaded with the game's own
- * UniVRM10, put where the character's model is, and follows her pose through
- * UniHumanoid.HumanPoseTransfer while her own meshes are hidden. */
-static void *g_vrm_task, *g_pose_src, *g_pose_dst;
+static void destroy(void *obj)
+{
+    if (!alive(obj)) return;
+    void *a[] = { obj };
+    invoke(method(ui.object, "Destroy", 1), NULL, a);
+}
 
 static void set_field(void *obj, const char *name, void *value)
 {
@@ -877,16 +884,26 @@ static void set_field(void *obj, const char *name, void *value)
     else logf_("vrm: no field %s", name);
 }
 
-/* the humanoid Animator of the character under VRMRoot */
-static void *find_character_animator(void)
+/* the humanoid Animators of the characters out, under /MascotRoot/VRMRoot,
+ * not counting our VRMs */
+static int character_animators(void *out[], int max)
 {
+    /* asked several times per tick */
+    static void *cache[MAX_WORN + 2];
+    static int cached = -1;
+    static DWORD at;
+    if (cached >= 0 && GetTickCount() - at < 5) {
+        int n = cached < max ? cached : max;
+        memcpy(out, cache, sizeof cache[0] * n);
+        return n;
+    }
     void *animator = find_class("UnityEngine", "Animator"), *component = find_class("UnityEngine", "Component");
     void *transform = find_class("UnityEngine", "Transform");
-    int none = 0;
+    int none = 0, n = 0;
     void *args[] = { il_type_get_object(il_class_get_type(animator)), &none };
     void *arr = invoke(ui.find_objects, NULL, args);
-    uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
-    for (uintptr_t i = 0; i < n; ++i) {
+    uintptr_t count = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
+    for (uintptr_t i = 0; i < count && n < max; ++i) {
         void *a = ((void **)((char *)arr + 0x20))[i];
         void *human = invoke(method(animator, "get_isHuman", 0), a, NULL);
         if (!human || !*(uint8_t *)il_object_unbox(human)) continue;
@@ -894,9 +911,143 @@ static void *find_character_animator(void)
         void *parent = t ? invoke(method(transform, "get_parent", 0), t, NULL) : NULL;
         char name[64] = "";
         if (parent) to_ascii(invoke(method(ui.object, "get_name", 0), parent, NULL), name, sizeof name);
-        if (!strcmp(name, "VRMRoot")) return a;
+        if (strcmp(name, "VRMRoot")) continue;
+        void *go = invoke(method(component, "get_gameObject", 0), a, NULL);
+        int ours = 0;
+        for (int w = 0; w < MAX_WORN; ++w) ours |= g_worn[w].go == go;
+        if (!ours) out[n++] = a;
     }
-    return NULL;
+    if (max >= MAX_WORN + 2) {
+        memcpy(cache, out, sizeof cache[0] * n);
+        cached = n;
+        at = GetTickCount();
+    }
+    return n;
+}
+
+/* letters only, lower case: "Cha_TurumakiMaki" -> "chaturumakimaki" */
+static void letters(const char *in, char *out, int size)
+{
+    int o = 0;
+    for (; *in && o < size - 1; ++in)
+        if (isalpha((unsigned char)*in)) out[o++] = (char)tolower((unsigned char)*in);
+    out[o] = 0;
+}
+
+/* How alike two names are, 0..1: the longest common subsequence over the
+ * longer name ("tsurumakimaki", "turumakimaki"), or the longest common run
+ * over the shorter one when it has 4 letters or more ("miyamaimoca", "moca") */
+static float alike(const char *a, const char *b)
+{
+    int la = (int)strlen(a), lb = (int)strlen(b), seq[65][65] = { { 0 } }, run[65][65] = { { 0 } }, longest = 0;
+    if (!la || !lb || la > 64 || lb > 64) return 0;
+    for (int i = 1; i <= la; ++i)
+        for (int j = 1; j <= lb; ++j) {
+            int same = a[i - 1] == b[j - 1];
+            seq[i][j] = same ? seq[i - 1][j - 1] + 1 : seq[i - 1][j] > seq[i][j - 1] ? seq[i - 1][j] : seq[i][j - 1];
+            run[i][j] = same ? run[i - 1][j - 1] + 1 : 0;
+            if (run[i][j] > longest) longest = run[i][j];
+        }
+    int lo = la < lb ? la : lb, hi = la < lb ? lb : la;
+    float by_seq = (float)seq[la][lb] / (float)hi, by_run = lo >= 4 ? (float)longest / (float)lo : 0;
+    return by_seq > by_run ? by_seq : by_run;
+}
+
+/* Her Animator. Its controller is named after her, but not exactly like the
+ * game's id: "Cha_IA_Animator" for "Release/1stPLACE_IA", "Cha_TurumakiMaki"
+ * for "Release/AHS_TsurumakiMaki". The closest name wins, if close enough. */
+static void *find_animator_for(const char *id)
+{
+    void *as[MAX_WORN + 2], *animator = find_class("UnityEngine", "Animator"), *best = NULL;
+    int n = character_animators(as, MAX_WORN + 2);
+    const char *tail = strrchr(id, '/');
+    tail = tail ? tail + 1 : id;
+    char want[96];
+    letters(strchr(tail, '_') ? strchr(tail, '_') + 1 : tail, want, sizeof want);
+    float best_score = 0.75f;
+    for (int i = 0; i < n; ++i) {
+        void *c = invoke(method(animator, "get_runtimeAnimatorController", 0), as[i], NULL);
+        char ctl[96] = "", name[96];
+        if (c) to_ascii(invoke(method(ui.object, "get_name", 0), c, NULL), ctl, sizeof ctl);
+        char *core = strncmp(ctl, "Cha_", 4) ? ctl : ctl + 4, *end = strstr(core, "_Animator");
+        if (end) *end = 0;
+        letters(core, name, sizeof name);
+        float score = alike(want, name);
+        if (score > best_score) {
+            best_score = score;
+            best = as[i];
+        }
+    }
+    return best;
+}
+
+static void face_setup(struct worn *w)
+{
+    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer"), *mesh_class = find_class("UnityEngine", "Mesh");
+    void *rs = children_of_type(w->her, smr), *mesh = NULL;
+    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
+    for (uintptr_t i = 0; i < n && !mesh; ++i) {
+        void *r = ((void **)((char *)rs + 0x20))[i];
+        void *m = invoke(method(smr, "get_sharedMesh", 0), r, NULL);
+        if (m && unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), m, NULL)) > 0) {
+            w->face_mesh = r;
+            mesh = m;
+        }
+    }
+    void *vrm_instance = find_class("UniVRM10", "Vrm10Instance"), *runtime_class = find_class("UniVRM10", "Vrm10Runtime");
+    void *keys = find_class("UniVRM10", "ExpressionKey");
+    void *runtime = invoke(method(vrm_instance, "get_Runtime", 0), w->instance, NULL);
+    w->face_expression = runtime ? invoke(method(runtime_class, "get_Expression", 0), runtime, NULL) : NULL;
+    if (!mesh || !w->face_expression || !keys) {
+        logf_("face: mesh %p, expression %p", mesh, w->face_expression);
+        w->face_mesh = NULL;
+        return;
+    }
+    keep(w, w->face_mesh);
+    keep(w, w->face_expression);
+    int found = 0;
+    for (int k = 0; k < FACE_KEYS; ++k) {
+        if (!g_face_keys[k] && (g_face_keys[k] = invoke(method(keys, g_face_map[k].preset, 0), NULL, NULL)))
+            il_gchandle_new(g_face_keys[k], 0);
+        for (int j = 0; j < 6; ++j) {
+            w->shapes[k][j] = -1;
+            if (!g_face_map[k].shapes[j]) continue;
+            void *a[] = { il_string_new(g_face_map[k].shapes[j]) };
+            w->shapes[k][j] = unbox_int(invoke(method(mesh_class, "GetBlendShapeIndex", 1), mesh, a));
+            found += w->shapes[k][j] >= 0;
+        }
+    }
+    logf_("face: mirroring %d of her blendshapes onto %d expressions", found, FACE_KEYS);
+}
+
+static void face_tick(void)
+{
+    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
+    void *expr = find_class("UniVRM10", "Vrm10RuntimeExpression");
+    static void *get_weight, *set_weight;
+    if (!get_weight) get_weight = method(smr, "GetBlendShapeWeight", 1);
+    if (!set_weight) set_weight = method(expr, "SetWeight", 2);
+    g_faces = 0;
+    for (int n = 0; n < MAX_WORN; ++n) {
+        struct worn *w = &g_worn[n];
+        if (!w->face_mesh || !alive(w->face_mesh)) continue;
+        g_faces++;
+        for (int k = 0; k < FACE_KEYS; ++k) {
+            if (!g_face_keys[k]) continue;
+            float v = 0;
+            for (int j = 0; j < 6; ++j) {
+                int i = w->shapes[k][j];
+                if (i < 0) continue;
+                void *a[] = { &i };
+                void *r = invoke(get_weight, w->face_mesh, a);
+                float s = r ? *(float *)il_object_unbox(r) / 100.0f : 0;
+                if (s > v) v = s;
+            }
+            if (v > 1) v = 1;
+            void *b[] = { il_object_unbox(g_face_keys[k]), &v };
+            invoke(set_weight, w->face_expression, b);
+        }
+    }
 }
 
 /* Shading like the game's characters. Their lilToon materials put the shadow
@@ -951,254 +1102,156 @@ static void vrm_game_look(void *m)
     }
 }
 
-static void vrm_attach(void *instance)
+/* the game's own MToon for VRM models ("Hidden/DesktopMate MToon"); it keeps
+ * all MToon settings, while UniVRM's MToon only casts a shadow in its renderer */
+static void *game_mtoon(void)
 {
-    int stage = 3;
-    FILE *sf = fopen(RUN_DIR "dmhook.vrmstage", "r");
-    if (sf) {
-        if (fscanf(sf, "%d", &stage) != 1) stage = 3;
-        fclose(sf);
+    static void *found;
+    if (found) return found;
+    void *shader = find_class("UnityEngine", "Shader"), *res = find_class("UnityEngine", "Resources");
+    static const char *const tsig[] = { "System.Type" };
+    void *ta[] = { il_type_get_object(il_class_get_type(shader)) };
+    void *all = invoke(method_typed(res, "FindObjectsOfTypeAll", 1, tsig), NULL, ta);
+    uintptr_t n = all ? *(uintptr_t *)((char *)all + 0x18) : 0;
+    for (uintptr_t i = 0; i < n && !found; ++i) {
+        void *sh = ((void **)((char *)all + 0x20))[i];
+        char name[128];
+        to_ascii(invoke(method(shader, "get_name", 0), sh, NULL), name, sizeof name);
+        if (!strcmp(name, "Hidden/DesktopMate MToon")) found = sh;
     }
-    logf_("vrm: attach stage %d", stage);
-    if (stage < 1) return;
+    if (found) il_gchandle_new(found, 0);
+    else logf_("vrm: Hidden/DesktopMate MToon not found");
+    return found;
+}
+
+/* puts w->instance where her model is and hands it her pose */
+static void vrm_attach(struct worn *w)
+{
     void *component = find_class("UnityEngine", "Component"), *transform = find_class("UnityEngine", "Transform");
     void *go_class = find_class("UnityEngine", "GameObject"), *renderer = find_class("UnityEngine", "Renderer");
+    void *animator = find_class("UnityEngine", "Animator"), *material = find_class("UnityEngine", "Material");
     void *pose = find_class("UniHumanoid", "HumanPoseTransfer");
-    void *orig = find_character_animator();
-    if (!orig || !pose) {
-        logf_("vrm: character animator %p, HumanPoseTransfer %p", orig, pose);
-        return;
-    }
-    void *ot = invoke(method(component, "get_transform", 0), orig, NULL);
-    void *og = invoke(method(component, "get_gameObject", 0), orig, NULL);
-    void *vt = invoke(method(component, "get_transform", 0), instance, NULL);
-    void *vg = invoke(method(component, "get_gameObject", 0), instance, NULL);
+    void *ot = invoke(method(component, "get_transform", 0), w->her, NULL);
+    void *og = invoke(method(component, "get_gameObject", 0), w->her, NULL);
+    void *vt = invoke(method(component, "get_transform", 0), w->instance, NULL);
+    w->go = keep(w, invoke(method(component, "get_gameObject", 0), w->instance, NULL));
+    if (!pose || !ot || !vt || !w->go) return;
 
     /* same parent and local placement as her model */
     void *parent = invoke(method(transform, "get_parent", 0), ot, NULL);
-    uint8_t keep = 0;
-    void *sp[] = { parent, &keep };
+    uint8_t world = 0;
+    void *sp[] = { parent, &world };
     invoke(method(transform, "SetParent", 2), vt, sp);
     const char *props[][2] = { { "get_localPosition", "set_localPosition" }, { "get_localRotation", "set_localRotation" },
                                { "get_localScale", "set_localScale" } };
+    float scale[3] = { 1, 1, 1 };
     for (int i = 0; i < 3; ++i) {
         void *v = invoke(method(transform, props[i][0], 0), ot, NULL);
         if (!v) continue;
         float *q = il_object_unbox(v);
         if (i == 1) {
             /* VRM 1.0 models face +Z, the game's characters the other way: q * 180 degrees about Y */
-            float x = q[0], y = q[1], z = q[2], w = q[3];
+            float x = q[0], y = q[1], z = q[2], s = q[3];
             q[0] = -z;
-            q[1] = w;
+            q[1] = s;
             q[2] = x;
             q[3] = -y;
         }
+        if (i == 2) memcpy(scale, q, sizeof scale);
         void *a[] = { q };
         invoke(method(transform, props[i][1], 1), vt, a);
     }
 
-    /* same hip height as hers, so sitting on a window lines up; Animator.humanScale
-     * is the hip height of the avatar's rest pose */
-    {
-        void *animator = find_class("UnityEngine", "Animator");
-        static const char *const tsig1[] = { "System.Type" };
-        void *ta[] = { il_type_get_object(il_class_get_type(animator)) };
-        void *va = invoke(method_typed(component, "GetComponent", 1, tsig1), instance, ta);
-        void *hs = invoke(method(animator, "get_humanScale", 0), orig, NULL);
-        void *vs = va ? invoke(method(animator, "get_humanScale", 0), va, NULL) : NULL;
-        float her = hs ? *(float *)il_object_unbox(hs) : 0, ours = vs ? *(float *)il_object_unbox(vs) : 0;
-        logf_("vrm: hip height %.3f, hers %.3f", ours, her);
-        if (her > 0 && ours > 0 && GetFileAttributesA(RUN_DIR "dmhook.vrm-nofit") == INVALID_FILE_ATTRIBUTES) {
-            void *v = invoke(method(transform, "get_localScale", 0), vt, NULL);
-            float *sc = v ? il_object_unbox(v) : NULL;
-            if (sc) {
-                for (int i = 0; i < 3; ++i) sc[i] *= her / ours;
-                void *a[] = { sc };
-                invoke(method(transform, "set_localScale", 1), vt, a);
-            }
-        }
+    /* same hip height as hers, so sitting on a window lines up; humanScale is
+     * the hip height of the avatar's rest pose */
+    static const char *const tsig[] = { "System.Type" };
+    void *ta[] = { il_type_get_object(il_class_get_type(animator)) };
+    void *va = invoke(method_typed(component, "GetComponent", 1, tsig), w->instance, ta);
+    void *hs = invoke(method(animator, "get_humanScale", 0), w->her, NULL);
+    void *vs = va ? invoke(method(animator, "get_humanScale", 0), va, NULL) : NULL;
+    float hers = hs ? *(float *)il_object_unbox(hs) : 0, ours = vs ? *(float *)il_object_unbox(vs) : 0;
+    if (hers > 0 && ours > 0) {
+        for (int i = 0; i < 3; ++i) scale[i] *= hers / ours;
+        void *a[] = { scale };
+        invoke(method(transform, "set_localScale", 1), vt, a);
     }
 
     /* her meshes are on the layer the character camera draws; use it for ours */
-    void *rs = children_of_type(orig, renderer);
+    void *rs = children_of_type(w->her, renderer);
     uintptr_t nr = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
-    for (uintptr_t i = 0; i < nr; ++i) {
-        void *g = invoke(method(component, "get_gameObject", 0), ((void **)((char *)rs + 0x20))[i], NULL);
-        void *layer = invoke(method(go_class, "get_layer", 0), g, NULL);
-        char name[64];
-        to_ascii(invoke(method(ui.object, "get_name", 0), g, NULL), name, sizeof name);
-        void *mat = invoke(method(renderer, "get_sharedMaterial", 0), ((void **)((char *)rs + 0x20))[i], NULL);
-        void *sh = mat ? invoke(method(find_class("UnityEngine", "Material"), "get_shader", 0), mat, NULL) : NULL;
-        char sname[128] = "";
-        if (sh) to_ascii(invoke(method(find_class("UnityEngine", "Shader"), "get_name", 0), sh, NULL), sname, sizeof sname);
-        logf_("vrm: her renderer %s on layer %d, shader %s", name, layer ? *(int32_t *)il_object_unbox(layer) : -1, sname);
-    }
+    int layer = 0, cast = 1;
     if (nr) {
-        void *g = invoke(method(component, "get_gameObject", 0), ((void **)((char *)rs + 0x20))[0], NULL);
-        void *layer = invoke(method(go_class, "get_layer", 0), g, NULL);
-        void *ts = children_of_type(instance, transform);
-        uintptr_t nt = ts ? *(uintptr_t *)((char *)ts + 0x18) : 0;
-        int l = layer ? *(int32_t *)il_object_unbox(layer) : 0;
-        for (uintptr_t i = 0; i < nt; ++i) {
-            void *tg = invoke(method(component, "get_gameObject", 0), ((void **)((char *)ts + 0x20))[i], NULL);
-            void *a[] = { &l };
-            invoke(method(go_class, "set_layer", 1), tg, a);
-        }
-        logf_("vrm: layer %d on %lu objects", l, (unsigned long)nt);
+        void *r0 = ((void **)((char *)rs + 0x20))[0];
+        layer = unbox_int(invoke(method(go_class, "get_layer", 0), invoke(method(component, "get_gameObject", 0), r0, NULL), NULL));
+        void *c = invoke(method(renderer, "get_shadowCastingMode", 0), r0, NULL);
+        if (c) cast = *(int32_t *)il_object_unbox(c);
+    }
+    void *ts = children_of_type(w->instance, transform);
+    uintptr_t nt = ts ? *(uintptr_t *)((char *)ts + 0x18) : 0;
+    for (uintptr_t i = 0; i < nt; ++i) {
+        void *a[] = { &layer };
+        invoke(method(go_class, "set_layer", 1), invoke(method(component, "get_gameObject", 0), ((void **)((char *)ts + 0x20))[i], NULL), a);
     }
 
-    /* the game draws characters with its own lilToon build; MToon only casts a
-       shadow there. Move the VRM's materials over, keeping texture and color. */
-    void *shader_class = find_class("UnityEngine", "Shader"), *material_class = find_class("UnityEngine", "Material");
-    void *templ = NULL, *lil = NULL, *lil_transparent = NULL;
-    for (uintptr_t i = 0; i < nr; ++i) {
-        void *m = invoke(method(renderer, "get_sharedMaterial", 0), ((void **)((char *)rs + 0x20))[i], NULL);
-        void *sh = m ? invoke(method(material_class, "get_shader", 0), m, NULL) : NULL;
-        char sname[128] = "";
-        if (sh) to_ascii(invoke(method(shader_class, "get_name", 0), sh, NULL), sname, sizeof sname);
-        if (!templ && !strcmp(sname, "Hidden/lilToonEncryptable/lilToonOutline")) {
-            templ = m;
-            lil = sh;
-        }
-        if (!lil_transparent && !strcmp(sname, "Hidden/lilToonEncryptable/lilToonTransparentOutline")) lil_transparent = sh;
-    }
-    if (!lil_transparent) lil_transparent = lil;
-    void *vrs = children_of_type(instance, renderer);
+    /* the game's MToon with shading like hers; shadows like hers too: the
+     * game's characters receive no real-time shadows, so a lying VRM had its
+     * face darkened by its own hair */
+    void *mtoon = game_mtoon();
+    void *vrs = children_of_type(w->instance, renderer);
     uintptr_t nv = vrs ? *(uintptr_t *)((char *)vrs + 0x18) : 0;
-    /* the game ships its own MToon for VRM models; it keeps all MToon settings */
-    void *dm_mtoon = NULL;
-    {
-        void *res = find_class("UnityEngine", "Resources");
-        static const char *const tsig2[] = { "System.Type" };
-        void *ta[] = { il_type_get_object(il_class_get_type(shader_class)) };
-        void *all = invoke(method_typed(res, "FindObjectsOfTypeAll", 1, tsig2), NULL, ta);
-        uintptr_t na = all ? *(uintptr_t *)((char *)all + 0x18) : 0;
-        for (uintptr_t i = 0; i < na && !dm_mtoon; ++i) {
-            void *sh = ((void **)((char *)all + 0x20))[i];
-            char sname[128];
-            to_ascii(invoke(method(shader_class, "get_name", 0), sh, NULL), sname, sizeof sname);
-            if (!strcmp(sname, "Hidden/DesktopMate MToon")) dm_mtoon = sh;
-        }
-    }
-    if (dm_mtoon && GetFileAttributesA(RUN_DIR "dmhook.vrm-liltoon") == INVALID_FILE_ATTRIBUTES) {
-        int moved = 0;
-        for (uintptr_t i = 0; i < nv; ++i) {
-            void *mats = invoke(method(renderer, "get_sharedMaterials", 0), ((void **)((char *)vrs + 0x20))[i], NULL);
-            uintptr_t nm = mats ? *(uintptr_t *)((char *)mats + 0x18) : 0;
-            for (uintptr_t j = 0; j < nm; ++j) {
-                void *m = ((void **)((char *)mats + 0x20))[j];
-                int queue = unbox_int(invoke(method(material_class, "get_renderQueue", 0), m, NULL));
-                void *a[] = { dm_mtoon };
-                invoke(method(material_class, "set_shader", 1), m, a);
-                void *q[] = { &queue };
-                invoke(method(material_class, "set_renderQueue", 1), m, q);
-                if (GetFileAttributesA(RUN_DIR "dmhook.vrm-authorlook") == INVALID_FILE_ATTRIBUTES) vrm_game_look(m);
-                moved++;
-            }
-        }
-        logf_("vrm: %d materials on Hidden/DesktopMate MToon", moved);
-        lil = NULL;
-    }
-    static const char *const fset[] = { "System.String", "System.Single" };
-    float outline_width = 0;
-    int changed = 0;
-    for (uintptr_t i = 0; lil && i < nv; ++i) {
+    uint8_t receive = 0;
+    for (uintptr_t i = 0; i < nv; ++i) {
         void *r = ((void **)((char *)vrs + 0x20))[i];
-        void *get = il_class_get_method_from_name(renderer, "get_materials", 0);
-        if (!get) get = il_class_get_method_from_name(renderer, "get_sharedMaterials", 0);
-        void *mats = invoke(get, r, NULL);
-        if (i == 0) logf_("vrm: %lu renderers, materials getter %p, array %p", (unsigned long)nv, get, mats);
+        void *a[] = { &receive }, *b[] = { &cast };
+        invoke(method(renderer, "set_receiveShadows", 1), r, a);
+        invoke(method(renderer, "set_shadowCastingMode", 1), r, b);
+        void *mats = mtoon ? invoke(method(renderer, "get_sharedMaterials", 0), r, NULL) : NULL;
         uintptr_t nm = mats ? *(uintptr_t *)((char *)mats + 0x18) : 0;
         for (uintptr_t j = 0; j < nm; ++j) {
             void *m = ((void **)((char *)mats + 0x20))[j];
-            int queue = unbox_int(invoke(method(material_class, "get_renderQueue", 0), m, NULL));
-            /* MToon keeps its culling in _M_CullMode (0 off, 1 front, 2 back), lilToon in _Cull */
-            static const char *const fget[] = { "System.String" };
-            void *gm = method_typed(material_class, "GetFloat", 1, fget);
-            void *ca[] = { il_string_new("_M_CullMode") };
-            void *cr = invoke(gm, m, ca);
-            float cull = cr ? *(float *)il_object_unbox(cr) : 2;
-            void *tex = invoke(method(material_class, "get_mainTexture", 0), m, NULL);
-            void *col = invoke(method(material_class, "get_color", 0), m, NULL);
-            float c[4] = { 1, 1, 1, 1 };
-            if (col) memcpy(c, il_object_unbox(col), sizeof c);
-            /* cutout and transparent parts (eye highlights, lashes) stay see-through */
-            void *a[] = { queue >= 2450 ? lil_transparent : lil };
-            invoke(method(material_class, "set_shader", 1), m, a);
-            void *tp[] = { templ };
-            if (GetFileAttributesA(RUN_DIR "dmhook.vrm-copyprops") != INVALID_FILE_ATTRIBUTES)
-                invoke(method(material_class, "CopyPropertiesFromMaterial", 1), m, tp);
-            void *t[] = { tex };
-            invoke(method(material_class, "set_mainTexture", 1), m, t);
-            void *cc[] = { c };
-            invoke(method(material_class, "set_color", 1), m, cc);
-            void *ow[] = { il_string_new("_OutlineWidth"), &outline_width };
-            invoke(method_typed(material_class, "SetFloat", 2, fset), m, ow);
-            void *la[] = { il_string_new("_Cull") };
-            void *lr = invoke(gm, m, la);
-            char mname[64];
-            to_ascii(invoke(method(ui.object, "get_name", 0), m, NULL), mname, sizeof mname);
-            logf_("vrm: material %s queue %d, MToon cull %.0f, lilToon cull was %.0f", mname, queue, cull,
-                  lr ? *(float *)il_object_unbox(lr) : -1);
-            void *cw[] = { il_string_new("_Cull"), &cull };
-            invoke(method_typed(material_class, "SetFloat", 2, fset), m, cw);
-            if (queue >= 2450) {
-                void *q[] = { &queue };
-                invoke(method(material_class, "set_renderQueue", 1), m, q);
-            }
-            changed++;
+            int queue = unbox_int(invoke(method(material, "get_renderQueue", 0), m, NULL));
+            void *sa[] = { mtoon }, *qa[] = { &queue };
+            invoke(method(material, "set_shader", 1), m, sa);
+            invoke(method(material, "set_renderQueue", 1), m, qa);
+            vrm_game_look(m);
         }
-    }
-    logf_("vrm: lilToon %p, %d materials moved", lil, changed);
-
-    /* shadows like hers: the game's characters do not receive real-time shadows,
-       so a lying VRM had its face darkened by its own hair */
-    if (nr) {
-        void *r0 = ((void **)((char *)rs + 0x20))[0];
-        void *recv = invoke(method(renderer, "get_receiveShadows", 0), r0, NULL);
-        void *cast = invoke(method(renderer, "get_shadowCastingMode", 0), r0, NULL);
-        uint8_t rv = recv ? *(uint8_t *)il_object_unbox(recv) : 0;
-        int cv = cast ? *(int32_t *)il_object_unbox(cast) : 1;
-        logf_("vrm: her shadows: receive %d, cast %d", rv, cv);
-        for (uintptr_t i = 0; i < nv; ++i) {
-            void *r = ((void **)((char *)vrs + 0x20))[i];
-            void *a[] = { &rv }, *b[] = { &cv };
-            invoke(method(renderer, "set_receiveShadows", 1), r, a);
-            invoke(method(renderer, "set_shadowCastingMode", 1), r, b);
-        }
+        /* loaded hidden; shown together with hiding her */
+        uint8_t on = 1;
+        void *ea[] = { &on };
+        invoke(method(renderer, "set_enabled", 1), r, ea);
     }
 
-    if (stage < 2) return;
-    /* hide her meshes; her skeleton keeps running the game's animation, IK and colliders */
+    /* hide her meshes; her skeleton keeps running the game's animation */
     uint8_t off = 0;
+    w->nhidden = 0;
     for (uintptr_t i = 0; i < nr; ++i) {
+        void *r = ((void **)((char *)rs + 0x20))[i];
+        void *was = invoke(method(renderer, "get_enabled", 0), r, NULL);
+        if (w->nhidden < 64) {
+            w->hidden[w->nhidden].renderer = keep(w, r);
+            w->hidden[w->nhidden++].enabled = was ? *(uint8_t *)il_object_unbox(was) : 1;
+        }
         void *a[] = { &off };
-        invoke(method(renderer, "set_enabled", 1), ((void **)((char *)rs + 0x20))[i], a);
+        invoke(method(renderer, "set_enabled", 1), r, a);
     }
 
-    if (stage < 3) return;
     /* her pose -> the VRM, every frame */
-    static const char *const tsig[] = { "System.Type" };
     void *add = method_typed(go_class, "AddComponent", 1, tsig);
-    void *ta[] = { il_type_get_object(il_class_get_type(pose)) };
-    void *src = invoke(add, og, ta);
-    void *dst = invoke(add, vg, ta);
-    if (!src || !dst) {
-        logf_("vrm: AddComponent failed (%p, %p)", src, dst);
+    void *pa[] = { il_type_get_object(il_class_get_type(pose)) };
+    w->src = keep(w, invoke(add, og, pa));
+    void *dst = keep(w, invoke(add, w->go, pa));
+    if (!w->src || !dst) {
+        logf_("vrm: AddComponent failed (%p, %p)", w->src, dst);
         return;
     }
     int from_transfer = 1; /* HumanPoseTransferSourceType: None, HumanPoseTransfer, HumanPoseClip */
-    set_field(dst, "Source", src); /* reference fields take the object itself */
+    set_field(dst, "Source", w->src); /* reference fields take the object itself */
     set_field(dst, "SourceType", &from_transfer);
-    il_gchandle_new(src, 0);
-    il_gchandle_new(dst, 0);
-    g_pose_src = src;
-    g_pose_dst = dst;
-    face_setup(orig, instance);
-    logf_("vrm: attached, %lu renderers hidden", (unsigned long)nr);
+    face_setup(w);
+    w->since = GetTickCount();
+    logf_("vrm: %s on %s, hip height %.3f (hers %.3f), %lu meshes hidden", w->file, w->character, ours, hers,
+          (unsigned long)nr);
 }
-
-static void *g_vrm_instance;
 
 static void describe_renderers(const char *what, void *comp)
 {
@@ -1317,164 +1370,968 @@ static void dump_materials(const char *what, void *comp, int by_shader)
     }
 }
 
+/* touch dmhook.vrmdiag: renderers and look properties of the first worn VRM
+ * and of the character wearing it */
 static void vrm_diag(void)
 {
     if (GetFileAttributesA(RUN_DIR "dmhook.vrmdiag") == INVALID_FILE_ATTRIBUTES) return;
     DeleteFileA(RUN_DIR "dmhook.vrmdiag");
-    void *orig = find_character_animator();
-    if (orig) describe_renderers("character", orig);
-    if (g_vrm_instance) describe_renderers("vrm", g_vrm_instance);
-    if (GetFileAttributesA(RUN_DIR "dmhook.vrmdiag-mat") != INVALID_FILE_ATTRIBUTES) {
-        DeleteFileA(RUN_DIR "dmhook.vrmdiag-mat");
-        if (g_pose_src || orig) dump_materials("character", g_pose_src ? g_pose_src : orig, 0);
-        if (g_vrm_instance) dump_materials("vrm", g_vrm_instance, 0);
-    }
-    void *behaviour = find_class("UnityEngine", "Behaviour");
-    for (int i = 0; i < 2; ++i) {
-        void *c = i ? g_pose_dst : g_pose_src;
-        if (!c) continue;
-        void *k = il_object_get_class(c), *v = NULL;
-        int type = -1;
-        void *f = il_class_get_field_from_name(k, "Avatar");
-        if (f) il_field_get_value(c, f, &v);
-        void *avatar = v;
-        v = NULL;
-        if ((f = il_class_get_field_from_name(k, "Source"))) il_field_get_value(c, f, &v);
-        if ((f = il_class_get_field_from_name(k, "SourceType"))) il_field_get_value(c, f, &type);
-        void *handler = NULL;
-        if ((f = il_class_get_field_from_name(k, "tgt"))) il_field_get_value(c, f, &handler);
-        void *en = invoke(method(behaviour, "get_enabled", 0), c, NULL);
-        void *ae = invoke(method(behaviour, "get_isActiveAndEnabled", 0), c, NULL);
-        logf_("pose %s: avatar %p, source %p, type %d, handler %p, enabled %d, active %d", i ? "dst" : "src", avatar, v,
-              type, handler, en ? *(uint8_t *)il_object_unbox(en) : -1, ae ? *(uint8_t *)il_object_unbox(ae) : -1);
-    }
-    void *camera = find_class("UnityEngine", "Camera"), *component = find_class("UnityEngine", "Component");
-    void *transform = find_class("UnityEngine", "Transform");
-    int none = 0;
-    void *args[] = { il_type_get_object(il_class_get_type(camera)), &none };
-    void *arr = invoke(ui.find_objects, NULL, args);
-    uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
-    for (uintptr_t i = 0; i < n; ++i) {
-        void *c = ((void **)((char *)arr + 0x20))[i];
-        char name[96];
-        to_ascii(invoke(method(ui.object, "get_name", 0), c, NULL), name, sizeof name);
-        void *mask = invoke(method(camera, "get_cullingMask", 0), c, NULL);
-        void *t = invoke(method(component, "get_transform", 0), c, NULL);
-        void *pos = t ? invoke(method(transform, "get_position", 0), t, NULL) : NULL;
-        float *pv = pos ? il_object_unbox(pos) : NULL;
-        logf_("camera %s: cullingMask %#x position (%.2f %.2f %.2f)", name, mask ? *(int *)il_object_unbox(mask) : -1,
-              pv ? pv[0] : 0, pv ? pv[1] : 0, pv ? pv[2] : 0);
-    }
-}
-
-/* Face sampling: write a number of ticks to dmhook.face. While it runs the
- * worker ticks fast; at the end every blendshape of her meshes that moved is
- * logged with its largest weight. */
-static int g_fast_ticks;
-static void face_sample(void)
-{
-    static void *meshes[32], *names_done;
-    static float maxw[32][256];
-    static int nmeshes, total;
-    FILE *f = fopen(RUN_DIR "dmhook.face", "r");
-    if (f) {
-        if (fscanf(f, "%d", &total) != 1) total = 150;
-        fclose(f);
-        DeleteFileA(RUN_DIR "dmhook.face");
-        void *orig = find_character_animator();
-        void *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
-        void *rs = orig ? children_of_type(orig, smr) : NULL;
-        uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
-        nmeshes = 0;
-        for (uintptr_t i = 0; i < n && nmeshes < 32; ++i) {
-            meshes[nmeshes] = ((void **)((char *)rs + 0x20))[i];
-            il_gchandle_new(meshes[nmeshes], 0);
-            memset(maxw[nmeshes], 0, sizeof maxw[0]);
-            nmeshes++;
-        }
-        g_fast_ticks = total;
-        names_done = NULL;
-        logf_("face: sampling %d meshes for %d ticks", nmeshes, total);
+    for (int i = 0; i < MAX_WORN; ++i) {
+        struct worn *w = &g_worn[i];
+        if (!w->instance || !alive(w->her)) continue;
+        describe_renderers("character", w->her);
+        describe_renderers("vrm", w->instance);
+        dump_materials("character", w->her, 0);
+        dump_materials("vrm", w->instance, 0);
         return;
     }
-    if (!g_fast_ticks || !nmeshes) return;
-    void *smr = find_class("UnityEngine", "SkinnedMeshRenderer"), *mesh_class = find_class("UnityEngine", "Mesh");
-    for (int m = 0; m < nmeshes; ++m) {
-        void *mesh = invoke(method(smr, "get_sharedMesh", 0), meshes[m], NULL);
-        int count = mesh ? unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), mesh, NULL)) : 0;
-        for (int i = 0; i < count && i < 256; ++i) {
-            void *a[] = { &i };
-            void *w = invoke(method(smr, "GetBlendShapeWeight", 1), meshes[m], a);
-            float v = w ? *(float *)il_object_unbox(w) : 0;
-            if (v > maxw[m][i]) maxw[m][i] = v;
-        }
-    }
-    if (--g_fast_ticks) return;
-    for (int m = 0; m < nmeshes; ++m) {
-        void *mesh = invoke(method(smr, "get_sharedMesh", 0), meshes[m], NULL);
-        int count = mesh ? unbox_int(invoke(method(mesh_class, "get_blendShapeCount", 0), mesh, NULL)) : 0;
-        char rname[64];
-        to_ascii(invoke(method(ui.object, "get_name", 0), meshes[m], NULL), rname, sizeof rname);
-        if (!count) continue;
-        logf_("face: %s has %d blendshapes", rname, count);
-        for (int i = 0; i < count && i < 256; ++i) {
-            char sname[96];
-            void *a[] = { &i };
-            to_ascii(invoke(method(mesh_class, "GetBlendShapeName", 1), mesh, a), sname, sizeof sname);
-            logf_("face:   %3d %-40s max %.0f", i, sname, maxw[m][i]);
-        }
-    }
-    (void)names_done;
+    logf_("vrmdiag: no VRM worn");
 }
 
-static void vrm_request(void)
+/* Mods: custom characters. Every .vrm in the characters folder is a mod with
+ * a name and a base character, whose animations and voice it uses. A mod
+ * that is on is worn by its base character whenever that character is out,
+ * so it works with Multi-Character too. Saved in characters.conf as
+ * "<file>\t<name>\t<base>\t<on>" lines. */
+#define MAX_MODS 32
+struct mod {
+    char file[260], name[128], base[128];
+    int on, calling; /* calling: turned on while her character is not out */
+};
+static struct mod g_mods[MAX_MODS];
+static int g_nmods;
+
+static void utf8_to_wide(const char *s, WCHAR *out, int n)
 {
-    vrm_diag();
-    face_sample();
-    face_tick();
-    if (g_vrm_task) {
-        void *k = il_object_get_class(g_vrm_task);
-        void *done = invoke(method(k, "get_IsCompleted", 0), g_vrm_task, NULL);
-        if (!done || !*(uint8_t *)il_object_unbox(done)) return;
-        void *faulted = invoke(method(k, "get_IsFaulted", 0), g_vrm_task, NULL);
-        if (faulted && *(uint8_t *)il_object_unbox(faulted)) {
-            char text[1024];
-            void *ex = invoke(method(k, "get_Exception", 0), g_vrm_task, NULL);
-            to_ascii(ex ? invoke(method(il_object_get_class(ex), "ToString", 0), ex, NULL) : NULL, text, sizeof text);
-            logf_("vrm: load failed: %s", text);
+    if (!MultiByteToWideChar(CP_UTF8, 0, s, -1, out, n)) out[0] = 0;
+}
+
+static void string_utf8(void *str, char *out, int size)
+{
+    int n = str ? WideCharToMultiByte(CP_UTF8, 0, (WCHAR *)il_string_chars(str), il_string_length(str), out, size - 1,
+                                      NULL, NULL)
+                : 0;
+    out[n > 0 ? n : 0] = 0;
+}
+
+/* launch.sh writes the folder (Linux path) to characters-dir */
+static int mods_dir(char *out, int size)
+{
+    char dir[400] = "";
+    FILE *f = fopen(RUN_DIR "characters-dir", "r");
+    if (!f) return 0;
+    if (!fgets(dir, sizeof dir, f)) dir[0] = 0;
+    fclose(f);
+    dir[strcspn(dir, "\r\n")] = 0;
+    snprintf(out, size, "Z:%s", dir);
+    for (char *c = out; *c; ++c)
+        if (*c == '/') *c = '\\';
+    return dir[0] != 0;
+}
+
+static int mod_path(const struct mod *m, char *out, int size)
+{
+    char dir[512];
+    if (!mods_dir(dir, sizeof dir)) return 0;
+    snprintf(out, size, "%s\\%s", dir, m->file);
+    return 1;
+}
+
+/* "Release/AHS_MiyamaiMoca" -> "Miyamai Moca" */
+static void pretty_character(const char *id, char *out, int size)
+{
+    const char *tail = strrchr(id, '/');
+    tail = tail ? tail + 1 : id;
+    if (strchr(tail, '_')) tail = strchr(tail, '_') + 1;
+    int o = 0;
+    for (const char *c = tail; *c && o < size - 2; ++c) {
+        if (c > tail && isupper((unsigned char)*c) && islower((unsigned char)c[-1])) out[o++] = ' ';
+        out[o++] = *c;
+    }
+    out[o] = 0;
+}
+
+/* JSON string at p (after the opening quote) to UTF-8 */
+static void json_string(const char *p, char *out, int size)
+{
+    int o = 0;
+    while (*p && *p != '"' && o < size - 5) {
+        unsigned c = (unsigned char)*p++;
+        if (c == '\\') {
+            char e = *p++;
+            if (e == 'u') {
+                unsigned u = 0;
+                if (sscanf(p, "%4x", &u) != 1) break;
+                p += 4;
+                if (u >= 0xd800 && u < 0xdc00 && p[0] == '\\' && p[1] == 'u') {
+                    unsigned lo = 0;
+                    if (sscanf(p + 2, "%4x", &lo) == 1) {
+                        u = 0x10000 + ((u - 0xd800) << 10) + (lo - 0xdc00);
+                        p += 6;
+                    }
+                }
+                if (u < 0x80) out[o++] = (char)u;
+                else if (u < 0x800) {
+                    out[o++] = (char)(0xc0 | u >> 6);
+                    out[o++] = (char)(0x80 | (u & 0x3f));
+                } else if (u < 0x10000) {
+                    out[o++] = (char)(0xe0 | u >> 12);
+                    out[o++] = (char)(0x80 | ((u >> 6) & 0x3f));
+                    out[o++] = (char)(0x80 | (u & 0x3f));
+                } else {
+                    out[o++] = (char)(0xf0 | u >> 18);
+                    out[o++] = (char)(0x80 | ((u >> 12) & 0x3f));
+                    out[o++] = (char)(0x80 | ((u >> 6) & 0x3f));
+                    out[o++] = (char)(0x80 | (u & 0x3f));
+                }
+                continue;
+            }
+            c = e == 'n' || e == 't' || e == 'r' ? ' ' : (unsigned char)e;
+        }
+        out[o++] = (char)c;
+    }
+    out[o] = 0;
+}
+
+/* The model's own name from the glTF JSON of the .vrm: VRM 1.0 keeps it in
+ * VRMC_vrm.meta.name, VRM 0.x in VRM.meta.title. */
+static void vrm_meta_name(const char *path, char *out, int size)
+{
+    WCHAR wpath[600];
+    utf8_to_wide(path, wpath, 600);
+    FILE *f = _wfopen(wpath, L"rb");
+    if (!f) return;
+    uint32_t h[5];
+    char *json = NULL;
+    /* header "glTF", version, length; first chunk: length, "JSON" */
+    if (fread(h, 4, 5, f) == 5 && h[0] == 0x46546c67 && h[4] == 0x4e4f534a && h[3] < (16u << 20) &&
+        (json = malloc(h[3] + 1))) {
+        if (fread(json, 1, h[3], f) == h[3]) {
+            json[h[3]] = 0;
         } else {
-            void *instance = invoke(method(k, "get_Result", 0), g_vrm_task, NULL);
-            logf_("vrm: loaded %p", instance);
-            if (instance) {
-                il_gchandle_new(instance, 0);
-                g_vrm_instance = instance;
-                vrm_attach(instance);
+            free(json);
+            json = NULL;
+        }
+    }
+    fclose(f);
+    if (!json) return;
+    const char *key = "\"name\"", *ext = strstr(json, "\"VRMC_vrm\":");
+    if (!ext) {
+        ext = strstr(json, "\"VRM\":");
+        key = "\"title\"";
+    }
+    const char *meta = ext ? strstr(ext, "\"meta\"") : NULL, *p = meta ? strstr(meta, key) : NULL;
+    if (p) {
+        p += strlen(key);
+        while (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        if (*p == '"') json_string(p + 1, out, size);
+    }
+    free(json);
+}
+
+static void mods_conf_path(char *out, int size)
+{
+    conf_path(out, size);
+    char *slash = strrchr(out, '/');
+    if (slash) snprintf(slash + 1, size - (slash + 1 - out), "characters.conf");
+}
+
+static void mods_save(void)
+{
+    char path[512], tmp[520];
+    mods_conf_path(path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) {
+        logf_("cannot write %s", tmp);
+        return;
+    }
+    for (int i = 0; i < g_nmods; ++i)
+        fprintf(f, "%s\t%s\t%s\t%d\n", g_mods[i].file, g_mods[i].name, g_mods[i].base, g_mods[i].on);
+    fclose(f);
+    MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING);
+}
+
+static void mods_load(void)
+{
+    char path[512], line[700];
+    mods_conf_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    while (g_nmods < MAX_MODS && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *fields[4] = { line };
+        int n = 1;
+        for (char *c = line; *c && n < 4; ++c)
+            if (*c == '\t') {
+                *c = 0;
+                fields[n++] = c + 1;
+            }
+        if (n < 4) continue;
+        struct mod *m = &g_mods[g_nmods++];
+        snprintf(m->file, sizeof m->file, "%s", fields[0]);
+        snprintf(m->name, sizeof m->name, "%s", fields[1]);
+        snprintf(m->base, sizeof m->base, "%s", fields[2]);
+        m->on = atoi(fields[3]);
+    }
+    fclose(f);
+}
+
+static int mod_cmp(const void *a, const void *b)
+{
+    return _stricmp(((const struct mod *)a)->name, ((const struct mod *)b)->name);
+}
+
+/* matches the records to the .vrm files in the folder; 1 if anything changed */
+static int mods_sync(void)
+{
+    static char files[MAX_MODS][260];
+    char dir[512], pattern[540];
+    WCHAR wpattern[600];
+    WIN32_FIND_DATAW fd;
+    int n = 0;
+    if (mods_dir(dir, sizeof dir)) {
+        snprintf(pattern, sizeof pattern, "%s\\*.vrm", dir);
+        utf8_to_wide(pattern, wpattern, 600);
+        HANDLE h = FindFirstFileW(wpattern, &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && n < MAX_MODS &&
+                    WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, files[n], 260, NULL, NULL))
+                    n++;
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+    static struct mod next[MAX_MODS];
+    int changed = n != g_nmods;
+    for (int i = 0; i < n; ++i) {
+        int found = -1;
+        for (int j = 0; j < g_nmods && found < 0; ++j)
+            if (!strcmp(g_mods[j].file, files[i])) found = j;
+        if (found >= 0) {
+            next[i] = g_mods[found];
+            continue;
+        }
+        changed = 1;
+        struct mod *m = &next[i];
+        memset(m, 0, sizeof *m);
+        snprintf(m->file, sizeof m->file, "%s", files[i]);
+        char path[800];
+        if (mod_path(m, path, sizeof path)) vrm_meta_name(path, m->name, sizeof m->name);
+        if (!m->name[0]) {
+            snprintf(m->name, sizeof m->name, "%s", files[i]);
+            char *dot = strrchr(m->name, '.');
+            if (dot) *dot = 0;
+        }
+        current_character(m->base, sizeof m->base);
+        logf_("mods: new %s, \"%s\", on %s", m->file, m->name, m->base);
+    }
+    if (!changed) return 0;
+    memcpy(g_mods, next, sizeof next[0] * n);
+    g_nmods = n;
+    qsort(g_mods, n, sizeof g_mods[0], mod_cmp);
+    return 1;
+}
+
+static struct mod *mod_on_for(const char *id)
+{
+    for (int i = 0; i < g_nmods; ++i)
+        if (g_mods[i].on && !strcmp(g_mods[i].base, id)) return &g_mods[i];
+    return NULL;
+}
+
+/* The game's saved slots (CharacterSlot/N) go stale when a character is
+ * dismissed; the scene is what counts. */
+static int is_out(const char *id)
+{
+    return find_animator_for(id) != NULL;
+}
+
+/* Worn VRMs follow the mods that are on and the characters out. One load runs
+ * at a time; UniVRM loads on the main thread in steps. */
+static void worn_free(struct worn *w)
+{
+    destroy(w->go);
+    destroy(w->src);
+    void *renderer = find_class("UnityEngine", "Renderer");
+    for (int i = 0; i < w->nhidden; ++i) {
+        if (!alive(w->hidden[i].renderer)) continue;
+        void *a[] = { &w->hidden[i].enabled };
+        invoke(method(renderer, "set_enabled", 1), w->hidden[i].renderer, a);
+    }
+    for (int i = 0; i < w->nhandles; ++i) il_gchandle_free(w->handles[i]);
+    logf_("vrm: %s off %s", w->file, w->character);
+    memset(w, 0, sizeof *w);
+}
+
+static void worn_load(struct worn *w, const struct mod *m)
+{
+    char path[800];
+    void *vrm10 = find_class("UniVRM10", "Vrm10");
+    if (!vrm10 || !mod_path(m, path, sizeof path)) return;
+    /* path, canLoadVrm0X, controlRig None, showMeshes, awaitCaller, material
+       generator (null: UniVRM's URP one throws here), metaCallback, ct */
+    uint8_t vrm0x = 1, show = 0;
+    int rig = 0;
+    uint64_t token = 0;
+    void *args[] = { il_string_new(path), &vrm0x, &rig, &show, NULL, NULL, NULL, NULL, &token };
+    w->task = keep(w, invoke(method(vrm10, "LoadPathAsync", 9), NULL, args));
+    logf_("vrm: loading %s for %s", m->file, w->character);
+}
+
+/* 1 while the load runs */
+static int worn_finish(struct worn *w)
+{
+    void *k = il_object_get_class(w->task);
+    void *done = invoke(method(k, "get_IsCompleted", 0), w->task, NULL);
+    if (!done || !*(uint8_t *)il_object_unbox(done)) return 1;
+    void *faulted = invoke(method(k, "get_IsFaulted", 0), w->task, NULL);
+    void *instance = NULL;
+    if (faulted && *(uint8_t *)il_object_unbox(faulted)) {
+        char text[1024];
+        void *ex = invoke(method(k, "get_Exception", 0), w->task, NULL);
+        to_ascii(ex ? invoke(method(il_object_get_class(ex), "ToString", 0), ex, NULL) : NULL, text, sizeof text);
+        logf_("vrm: %s failed to load: %s", w->file, text);
+    } else {
+        instance = invoke(method(k, "get_Result", 0), w->task, NULL);
+    }
+    w->task = NULL;
+    if (!instance) return 0; /* stays as a failed entry, so it is not retried */
+    w->instance = keep(w, instance);
+    if (!w->her) {
+        /* loaded before her: bring her out now, put it on her when she exists */
+        w->go = keep(w, invoke(method(find_class("UnityEngine", "Component"), "get_gameObject", 0), instance, NULL));
+        w->waiting = 1;
+        w->since = GetTickCount();
+        if (!is_out(w->character)) bring_out(w->character);
+        return 0;
+    }
+    if (!alive(w->her)) {
+        w->go = keep(w, invoke(method(find_class("UnityEngine", "Component"), "get_gameObject", 0), instance, NULL));
+        worn_free(w);
+        return 0;
+    }
+    vrm_attach(w);
+    return 0;
+}
+
+/* the game can turn her meshes back on while she comes out */
+static void rehide(struct worn *w)
+{
+    void *renderer = find_class("UnityEngine", "Renderer");
+    uint8_t off = 0;
+    for (int i = 0; i < w->nhidden; ++i) {
+        void *r = invoke(method(renderer, "get_enabled", 0), w->hidden[i].renderer, NULL);
+        void *a[] = { &off };
+        if (r && *(uint8_t *)il_object_unbox(r)) invoke(method(renderer, "set_enabled", 1), w->hidden[i].renderer, a);
+    }
+}
+
+static void worn_tick(void)
+{
+    DWORD now = GetTickCount();
+    int loading = 0;
+    g_watching = 0;
+    for (int i = 0; i < MAX_WORN; ++i) {
+        struct worn *w = &g_worn[i];
+        if (!w->character[0]) continue;
+        const struct mod *m = mod_on_for(w->character);
+        int on = m && !strcmp(m->file, w->file);
+        if (w->task && worn_finish(w)) {
+            loading = 1; /* finishes even when no longer wanted, then goes */
+            continue;
+        }
+        if (!w->character[0]) continue;
+        if (w->leaving) {
+            if (!alive(w->her) || now - w->since > 8000) worn_free(w);
+            continue;
+        }
+        if (w->waiting) {
+            void *her = on ? find_animator_for(w->character) : NULL;
+            static DWORD said;
+            if (!her && now - said > 1000) {
+                said = now;
+                void *as[8], *animator = find_class("UnityEngine", "Animator");
+                int n = character_animators(as, 8);
+                char line[400] = "";
+                for (int k = 0, o = 0; k < n; ++k) {
+                    void *c = invoke(method(animator, "get_runtimeAnimatorController", 0), as[k], NULL);
+                    char ctl[96] = "-";
+                    if (c) to_ascii(invoke(method(ui.object, "get_name", 0), c, NULL), ctl, sizeof ctl);
+                    o += snprintf(line + o, sizeof line - o, " %s", ctl);
+                }
+                logf_("vrm: waiting for %s, characters:%s", w->character, line);
+            }
+            if (her) {
+                w->her = keep(w, her);
+                w->waiting = 0;
+                vrm_attach(w);
+            } else if (!on || now - w->since > 20000) {
+                logf_("vrm: %s did not come out", w->character);
+                worn_free(w);
+                continue;
+            }
+            g_watching++;
+            continue;
+        }
+        if (!w->instance) {
+            if (!on) worn_free(w); /* a failed load stays until the mod is off */
+            continue;
+        }
+        if (!on || !is_out(w->character) || !alive(w->her)) {
+            worn_free(w);
+            continue;
+        }
+        if (now - w->since < 5000) {
+            rehide(w);
+            g_watching++;
+        }
+    }
+    if (loading) return;
+    for (int n = 0; n < g_nmods; ++n) {
+        struct mod *m = &g_mods[n];
+        int out = m->on && is_out(m->base);
+        if (!out && !(m->on && m->calling)) continue;
+        int have = 0;
+        for (int i = 0; i < MAX_WORN; ++i) have |= !strcmp(g_worn[i].character, m->base) && !strcmp(g_worn[i].file, m->file);
+        if (have) continue;
+        void *her = out ? find_animator_for(m->base) : NULL;
+        if (out && !her) continue; /* her model is not there yet */
+        for (int i = 0; i < MAX_WORN; ++i) {
+            struct worn *w = &g_worn[i];
+            if (w->character[0]) continue;
+            snprintf(w->character, sizeof w->character, "%s", m->base);
+            snprintf(w->file, sizeof w->file, "%s", m->file);
+            w->her = her ? keep(w, her) : NULL;
+            m->calling = 0;
+            worn_load(w, m);
+            return;
+        }
+    }
+}
+
+/* The game's character list: the banner of each slot is named after the
+ * character ("1stPLACE_IA"), its button brings the character out. */
+#define MAX_CHARS 64
+static char g_chars[MAX_CHARS][128];
+static void *g_char_buttons[MAX_CHARS];
+static uint32_t g_char_handles[MAX_CHARS];
+static int g_nchars;
+
+/* the banner texture's name: from the inline style the game sets in code,
+ * or from the resolved style once the menu has been shown */
+static void banner_name(void *e, char *out, int size)
+{
+    static void *resolved_bg;
+    if (!resolved_bg)
+        resolved_bg = il_class_get_method_from_name(ui.element, "UnityEngine.UIElements.IResolvedStyle.get_backgroundImage", 0);
+    out[0] = 0;
+    void *st = invoke(ui.get_style, e, NULL);
+    void *m = st ? il_class_get_method_from_name(il_object_get_class(st), "get_backgroundImage", 0) : NULL;
+    if (st && !m) m = il_class_get_method_from_name(il_object_get_class(st), "UnityEngine.UIElements.IStyle.get_backgroundImage", 0);
+    for (int pass = 0; pass < 2 && !out[0]; ++pass) {
+        void *r = pass ? (resolved_bg ? invoke(resolved_bg, e, NULL) : NULL) : (m ? invoke(m, st, NULL) : NULL);
+        /* Background: texture, sprite, render texture, vector image (StyleBackground starts with it) */
+        void **bg = r ? il_object_unbox(r) : NULL;
+        for (int j = 0; bg && j < 4 && !out[0]; ++j)
+            if (bg[j]) to_ascii(invoke(method(ui.object, "get_name", 0), bg[j], NULL), out, size);
+    }
+}
+
+static void scan_characters(void *slots)
+{
+    int n = 0;
+    for (int i = 0, c = unbox_int(invoke(ui.child_count, slots, NULL)); i < c && n < MAX_CHARS; ++i) {
+        void *slot = element_at(slots, i);
+        void *main = unbox_int(invoke(ui.child_count, slot, NULL)) ? element_at(slot, 0) : NULL;
+        char name[96] = "";
+        if (main) banner_name(main, name, sizeof name);
+        if (!name[0]) continue;
+        if (g_char_handles[n]) il_gchandle_free(g_char_handles[n]);
+        snprintf(g_chars[n], sizeof g_chars[0], "Release/%s", name);
+        g_char_handles[n] = il_gchandle_new(main, 0);
+        g_char_buttons[n++] = main;
+    }
+    g_nchars = n;
+}
+
+static void bring_out(const char *id)
+{
+    void *button = find_class("UnityEngine.UIElements", "Button");
+    void *clickable = find_class("UnityEngine.UIElements", "Clickable");
+    for (int i = 0; i < g_nchars; ++i) {
+        if (strcmp(g_chars[i], id)) continue;
+        void *c = invoke(method(button, "get_clickable", 0), g_char_buttons[i], NULL);
+        void *a[] = { NULL };
+        if (c) invoke(method(clickable, "Invoke", 1), c, a);
+        logf_("mods: brought out %s", id);
+        return;
+    }
+    logf_("mods: no slot for %s", id);
+}
+
+/* The Mods block above the game's list: a card per mod (the game's green
+ * check while it is worn, a gear for its editor), "Add a VRM model" and the
+ * editor of one mod at a time. */
+static void *g_mods_box, *g_add_card, *g_edit_name, *g_edit_base, *g_edit_delete, *g_edit_delete_label;
+static void *g_cards[MAX_MODS], *g_card_names[MAX_MODS], *g_card_subs[MAX_MODS], *g_checks[MAX_MODS], *g_gears[MAX_MODS];
+static int g_ncards, g_shown[MAX_MODS], g_editing = -1, g_delete_armed;
+
+static void hide_input(void *toggle)
+{
+    void *mark = find_element(toggle, "unity-checkmark", 0);
+    void *box = mark ? invoke(ui.get_parent, mark, NULL) : NULL;
+    if (box) style_enum(box, "display", 1);
+}
+
+static void card_frame(void *e, float r, float g, float b)
+{
+    static const char *corners[] = { "TopLeft", "TopRight", "BottomRight", "BottomLeft" };
+    static const char *sides[] = { "Top", "Right", "Bottom", "Left" };
+    char n[64];
+    style_color(e, "backgroundColor", r, g, b, 1);
+    for (int i = 0; i < 4; ++i) {
+        snprintf(n, sizeof n, "border%sWidth", sides[i]);
+        style_float(e, n, 2);
+        snprintf(n, sizeof n, "border%sColor", sides[i]);
+        style_color(e, n, 0.85f, 0.85f, 0.85f, 1);
+        snprintf(n, sizeof n, "border%sRadius", corners[i]);
+        style_px(e, n, 3);
+    }
+}
+
+static void no_spacing(void *e)
+{
+    static const char *sides[] = { "Top", "Right", "Bottom", "Left" };
+    char n[32];
+    for (int i = 0; i < 4; ++i) {
+        snprintf(n, sizeof n, "margin%s", sides[i]);
+        style_px(e, n, 0);
+        snprintf(n, sizeof n, "padding%s", sides[i]);
+        style_px(e, n, 0);
+    }
+}
+
+static void *new_label(const char *text, float size, int bold, float alpha)
+{
+    void *l = new_element(ui.label, text, NULL, NULL);
+    label_style(l, size, bold, alpha);
+    no_spacing(l);
+    style_enum(l, "unityTextAlign", 4); /* MiddleCenter */
+    return l;
+}
+
+/* A toggle that looks like a button; *sub gets a second, smaller line. In a
+ * character-slot it takes the game's slot size (the class fills its parent). */
+static void *add_card(void *parent, int in_slot, const char *name, const char *caption, void **label, void **sub)
+{
+    void *t = new_element(ui.toggle, NULL,
+                          in_slot ? "unity-base-field--no-label character-slot__main" : "unity-base-field--no-label", name);
+    hide_input(t);
+    style_px(t, "paddingLeft", 28);
+    style_px(t, "paddingRight", 28);
+    card_frame(t, 0.17f, 0.17f, 0.19f);
+    style_enum(t, "flexDirection", 0); /* Column */
+    style_enum(t, "justifyContent", 1); /* Center */
+    style_enum(t, "alignItems", 2);     /* Center */
+    void *l = new_label(caption, sub ? 15 : 16, 1, 1);
+    add_child(t, l);
+    if (label) *label = l;
+    if (sub) {
+        *sub = new_label("", 11, 0, 0.75f);
+        add_child(t, *sub);
+    }
+    add_child(parent, t);
+    il_gchandle_new(t, 0);
+    return t;
+}
+
+static void *add_heading(void *parent, const char *text, float size, int bold, float alpha)
+{
+    void *l = new_element(ui.label, text, NULL, NULL);
+    label_style(l, size, bold, alpha);
+    style_px(l, "marginTop", 6);
+    style_px(l, "marginBottom", 6);
+    style_enum(l, "whiteSpace", 0); /* Normal: wraps */
+    add_child(parent, l);
+    return l;
+}
+
+static void set_text(void *label, const char *text)
+{
+    void *a[] = { il_string_new(text) };
+    invoke(method(ui.label, "set_text", 1), label, a);
+}
+
+static void card_sub(int i)
+{
+    char who[128], text[160];
+    pretty_character(g_mods[i].base, who, sizeof who);
+    snprintf(text, sizeof text, "as %s", who);
+    set_text(g_card_subs[i], text);
+}
+
+static void build_editor(void *parent, int i)
+{
+    void *box = new_element(ui.element, NULL, NULL, "linux-mod-editor");
+    card_frame(box, 0.12f, 0.12f, 0.14f);
+    style_px(box, "paddingLeft", 8);
+    style_px(box, "paddingRight", 8);
+    style_px(box, "paddingBottom", 8);
+    style_px(box, "marginBottom", 8);
+    add_heading(box, "Name", 13, 1, 0.9f);
+    void *tf = find_class("UnityEngine.UIElements", "TextField");
+    g_edit_name = il_object_new(tf);
+    invoke(method(tf, ".ctor", 0), g_edit_name, NULL);
+    void *na[] = { il_string_new(g_mods[i].name) };
+    invoke(method(tf, "SetValueWithoutNotify", 1), g_edit_name, na);
+    void *input = find_element(g_edit_name, "unity-text-input", 0);
+    if (input) {
+        style_color(input, "backgroundColor", 0.08f, 0.08f, 0.09f, 1);
+        style_color(input, "color", 1, 1, 1, 1);
+        style_px(input, "fontSize", 15);
+    }
+    add_child(box, g_edit_name);
+    il_gchandle_new(g_edit_name, 0);
+
+    add_heading(box, "Animations and voice of", 13, 1, 0.9f);
+    void *dd = find_class("UnityEngine.UIElements", "DropdownField");
+    g_edit_base = new_element(dd, NULL, "unity-base-field--no-label menu-dropdown", NULL);
+    void *list = invoke(method(dd, "get_choices", 0), g_edit_base, NULL);
+    if (!list) {
+        /* a new List<string>, made from the class of the game's own dropdown list */
+        void *other = find_in_documents("voice-pattern-dropdown");
+        void *ol = other ? invoke(method(dd, "get_choices", 0), other, NULL) : NULL;
+        if (ol && (list = il_object_new(il_object_get_class(ol)))) invoke(method(il_object_get_class(ol), ".ctor", 0), list, NULL);
+    }
+    char who[128], current[128];
+    pretty_character(g_mods[i].base, current, sizeof current);
+    for (int c = 0; list && c < g_nchars; ++c) {
+        pretty_character(g_chars[c], who, sizeof who);
+        void *a[] = { il_string_new(who) };
+        invoke(method(il_object_get_class(list), "Add", 1), list, a);
+    }
+    if (list) {
+        void *a[] = { list };
+        invoke(method(dd, "set_choices", 1), g_edit_base, a);
+    }
+    void *va[] = { il_string_new(current) };
+    invoke(method(dd, "SetValueWithoutNotify", 1), g_edit_base, va);
+    add_child(box, g_edit_base);
+    il_gchandle_new(g_edit_base, 0);
+
+    g_edit_delete = add_card(box, 0, "linux-mod-delete", "Delete", &g_edit_delete_label, NULL);
+    card_frame(g_edit_delete, 0.45f, 0.12f, 0.12f);
+    style_px(g_edit_delete, "height", 30);
+    style_px(g_edit_delete, "marginLeft", 0);
+    style_px(g_edit_delete, "marginRight", 0);
+    g_delete_armed = 0;
+    add_child(parent, box);
+}
+
+static void build_mods(void *slots)
+{
+    void *parent = invoke(ui.get_parent, slots, NULL);
+    if (!parent) return;
+    scan_characters(slots);
+    void *ia[] = { slots };
+    int at = unbox_int(invoke(method(ui.element, "IndexOf", 1), parent, ia));
+    /* the game's list keeps 16 px on the left for the check icon */
+    void *box = new_element(ui.element, NULL, NULL, "linux-mods");
+    style_px(box, "paddingLeft", 16);
+    style_px(box, "paddingRight", 15);
+    add_heading(box, "Mods", 20, 1, 1);
+    for (int i = 0; i < g_nmods; ++i) {
+        char name[32];
+        void *slot = new_element(ui.element, NULL, "character-slot", NULL);
+        snprintf(name, sizeof name, "linux-mod-%d", i);
+        g_cards[i] = add_card(slot, 1, name, g_mods[i].name, &g_card_names[i], &g_card_subs[i]);
+        card_sub(i);
+        g_checks[i] = new_element(ui.element, NULL, "character-slot__choice-icon", NULL);
+        add_child(slot, g_checks[i]);
+        il_gchandle_new(g_checks[i], 0);
+        g_gears[i] = new_element(ui.toggle, NULL, "unity-base-field--no-label character-slot__setting-button", NULL);
+        hide_input(g_gears[i]);
+        style_enum(g_gears[i], "display", 0);
+        style_enum(g_gears[i], "position", 1); /* Absolute */
+        style_px(g_gears[i], "right", 6);
+        style_px(g_gears[i], "top", 6);
+        style_px(g_gears[i], "width", 26);
+        style_px(g_gears[i], "height", 26);
+        add_child(slot, g_gears[i]);
+        il_gchandle_new(g_gears[i], 0);
+        g_shown[i] = -1;
+        add_child(box, slot);
+        if (i == g_editing) build_editor(box, i);
+    }
+    g_ncards = g_nmods;
+    void *slot = new_element(ui.element, NULL, "character-slot", NULL);
+    g_add_card = add_card(slot, 1, "linux-mods-add", "+  Add a VRM model", NULL, NULL);
+    add_child(box, slot);
+    add_heading(box, "A mod is worn by the character chosen with its gear and uses that character's animations and voice.",
+                12, 0, 0.8f);
+    add_heading(box, "Characters", 20, 1, 1);
+    void *a[] = { &at, box };
+    invoke(method(ui.element, "Insert", 2), parent, a);
+    il_gchandle_new(box, 0);
+    g_mods_box = box;
+}
+
+static void rebuild_mods(void)
+{
+    if (g_mods_box) invoke(method(ui.element, "RemoveFromHierarchy", 0), g_mods_box, NULL);
+    g_mods_box = NULL;
+    g_ncards = 0;
+}
+
+static int toggled(void *t)
+{
+    void *r = invoke(method(ui.toggle, "get_value", 0), t, NULL);
+    return r && *(uint8_t *)il_object_unbox(r);
+}
+
+static void set_toggle(void *t, int v)
+{
+    uint8_t b = (uint8_t)v;
+    void *a[] = { &b };
+    invoke(method(ui.toggle, "SetValueWithoutNotify", 1), t, a);
+}
+
+/* a click on a mod card: wear it (bringing its character out) or take it off */
+static void click_mod(int i)
+{
+    struct mod *m = &g_mods[i];
+    void *others[MAX_WORN + 2];
+    if (m->on && is_out(m->base)) {
+        m->on = 0;
+        /* with others out, a click on her slot dismisses her; the VRM leaves with her */
+        if (character_animators(others, MAX_WORN + 2) > 1) {
+            for (int j = 0; j < MAX_WORN; ++j)
+                if (!strcmp(g_worn[j].character, m->base) && g_worn[j].instance && !g_worn[j].waiting) {
+                    g_worn[j].leaving = 1;
+                    g_worn[j].since = GetTickCount();
+                }
+            bring_out(m->base);
+        }
+    } else {
+        for (int j = 0; j < g_nmods; ++j)
+            if (j != i && !strcmp(g_mods[j].base, m->base)) g_mods[j].on = 0;
+        m->on = 1;
+        /* loaded first; worn_finish brings her out */
+        m->calling = !is_out(m->base);
+    }
+    logf_("mods: %s %s", m->name, m->on ? "on" : "off");
+    mods_save();
+}
+
+static void edit_tick(void)
+{
+    struct mod *m = &g_mods[g_editing];
+    char text[128];
+    void *tf = find_class("UnityEngine.UIElements", "TextField"), *dd = find_class("UnityEngine.UIElements", "DropdownField");
+    string_utf8(invoke(method(tf, "get_value", 0), g_edit_name, NULL), text, sizeof text);
+    for (char *c = text; *c; ++c)
+        if (*c == '\t') *c = ' ';
+    if (text[0] && strcmp(text, m->name)) {
+        snprintf(m->name, sizeof m->name, "%s", text);
+        set_text(g_card_names[g_editing], m->name);
+        mods_save();
+    }
+    char who[128];
+    to_ascii(invoke(method(dd, "get_value", 0), g_edit_base, NULL), text, sizeof text);
+    for (int c = 0; c < g_nchars; ++c) {
+        pretty_character(g_chars[c], who, sizeof who);
+        if (strcmp(who, text) || !strcmp(g_chars[c], m->base)) continue;
+        snprintf(m->base, sizeof m->base, "%s", g_chars[c]);
+        if (m->on)
+            for (int j = 0; j < g_nmods; ++j)
+                if (&g_mods[j] != m && !strcmp(g_mods[j].base, m->base)) g_mods[j].on = 0;
+        card_sub(g_editing);
+        mods_save();
+        logf_("mods: %s now on %s", m->name, m->base);
+        break;
+    }
+    if (!toggled(g_edit_delete)) return;
+    set_toggle(g_edit_delete, 0);
+    if (!g_delete_armed) {
+        g_delete_armed = 1;
+        set_text(g_edit_delete_label, "Click again to delete");
+        return;
+    }
+    char path[800];
+    WCHAR wpath[800];
+    if (mod_path(m, path, sizeof path)) {
+        utf8_to_wide(path, wpath, 800);
+        DeleteFileW(wpath);
+    }
+    logf_("mods: deleted %s", m->file);
+    memmove(m, m + 1, (size_t)(g_nmods - g_editing - 1) * sizeof *m);
+    g_nmods--;
+    g_editing = -1;
+    mods_save();
+    rebuild_mods();
+}
+
+static void click_mod(int i);
+
+static void mods_tick(void)
+{
+    /* development: dmhook.click with a mod index clicks its card */
+    FILE *dev = fopen(RUN_DIR "dmhook.click", "r");
+    if (dev) {
+        int i = -1;
+        if (fscanf(dev, "%d", &i) != 1) i = -1;
+        fclose(dev);
+        DeleteFileA(RUN_DIR "dmhook.click");
+        if (i >= 0 && i < g_nmods) click_mod(i);
+        /* -1: the game's Multi-Character switch */
+        void *t = i == -1 ? find_in_documents("multi-chara-toggle") : NULL;
+        void *c = t ? invoke(method(find_class("UnityEngine.UIElements", "Button"), "get_clickable", 0), t, NULL) : NULL;
+        void *na[] = { NULL };
+        if (c) invoke(method(find_class("UnityEngine.UIElements", "Clickable"), "Invoke", 1), c, na);
+    }
+    static DWORD last_scan;
+    static int loaded;
+    char picked[260] = "";
+    if (!loaded) {
+        mods_load();
+        loaded = 1;
+    }
+    /* launch.sh answers "Add a VRM model" with the copied file's name */
+    FILE *f = fopen(RUN_DIR "pick-vrm.done", "r");
+    if (f) {
+        if (!fgets(picked, sizeof picked, f)) picked[0] = 0;
+        fclose(f);
+        DeleteFileA(RUN_DIR "pick-vrm.done");
+        picked[strcspn(picked, "\r\n")] = 0;
+    }
+    if (picked[0] || GetTickCount() - last_scan > 2000) {
+        last_scan = GetTickCount();
+        if (mods_sync()) {
+            g_editing = -1;
+            mods_save();
+            rebuild_mods();
+        }
+        for (int i = 0; picked[0] && i < g_nmods; ++i)
+            if (!strcmp(g_mods[i].file, picked)) {
+                current_character(g_mods[i].base, sizeof g_mods[i].base);
+                g_mods[i].on = 0;
+                click_mod(i);
+                rebuild_mods();
+            }
+    }
+    if (!g_mods_box || !invoke(ui.get_parent, g_mods_box, NULL)) {
+        void *slots = find_in_documents("character-slots");
+        if (slots) build_mods(slots);
+        return;
+    }
+    if (!g_nchars) scan_characters(find_in_documents("character-slots"));
+
+    for (int i = 0; i < g_ncards; ++i) {
+        int worn = g_mods[i].on && is_out(g_mods[i].base);
+        if (toggled(g_cards[i]) != (g_shown[i] == 1)) {
+            click_mod(i);
+            worn = g_mods[i].on && is_out(g_mods[i].base);
+            g_shown[i] = -1;
+        }
+        if (worn != g_shown[i]) {
+            g_shown[i] = worn;
+            set_toggle(g_cards[i], worn);
+            style_enum(g_checks[i], "display", worn ? 0 : 1);
+        }
+        if (toggled(g_gears[i])) {
+            set_toggle(g_gears[i], 0);
+            g_editing = g_editing == i ? -1 : i;
+            rebuild_mods();
+            return;
+        }
+    }
+    if (g_editing >= 0 && g_editing < g_ncards) edit_tick();
+    if (g_add_card && toggled(g_add_card)) {
+        set_toggle(g_add_card, 0);
+        if ((f = fopen(RUN_DIR "pick-vrm", "w"))) fclose(f);
+        logf_("mods: asked for a file");
+    }
+}
+
+/* Character menu diagnostics: touch dmhook.slots. Layout, banner texture and
+ * check icon state of the first slots, the saved slots and the characters in
+ * the scene. */
+static float *rect_of(void *e, float out[4])
+{
+    void *r = invoke(method(ui.element, "get_worldBound", 0), e, NULL);
+    if (r) memcpy(out, il_object_unbox(r), 4 * sizeof(float));
+    else out[0] = out[1] = out[2] = out[3] = -1;
+    return out;
+}
+
+static void resolved(void *e, const char *prop, char *out, int size)
+{
+    char name[128];
+    snprintf(name, sizeof name, "UnityEngine.UIElements.IResolvedStyle.get_%s", prop);
+    void *m = il_class_get_method_from_name(ui.element, name, 0);
+    void *r = m ? invoke(m, e, NULL) : NULL;
+    if (!r) {
+        snprintf(out, size, "?");
+        return;
+    }
+    if (!strcmp(prop, "backgroundImage")) {
+        void **bg = il_object_unbox(r);
+        out[0] = 0;
+        for (int i = 0; i < 4 && !out[0]; ++i)
+            if (bg[i]) to_ascii(invoke(method(ui.object, "get_name", 0), bg[i], NULL), out, size);
+        if (!out[0]) snprintf(out, size, "none");
+    } else if (!strcmp(prop, "opacity")) {
+        snprintf(out, size, "%.2f", *(float *)il_object_unbox(r));
+    } else {
+        snprintf(out, size, "%d", *(int32_t *)il_object_unbox(r));
+    }
+}
+
+static void slots_diag(void)
+{
+    if (GetFileAttributesA(RUN_DIR "dmhook.slots") == INVALID_FILE_ATTRIBUTES) return;
+    DeleteFileA(RUN_DIR "dmhook.slots");
+    for (int i = 0; i < 6; ++i) {
+        char key[32], id[128];
+        snprintf(key, sizeof key, "CharacterSlot/%d", i);
+        void *a[] = { il_string_new(key) };
+        to_ascii(invoke(method(ui.prefs, "GetString", 1), NULL, a), id, sizeof id);
+        logf_("prefs %s = %s", key, id);
+    }
+    void *slots = find_in_documents("character-slots");
+    void *parent = slots ? invoke(ui.get_parent, slots, NULL) : NULL;
+    void *lists[] = { parent ? element_at(parent, 0) : NULL, slots };
+    for (int l = 0; l < 2; ++l) {
+        if (!lists[l]) continue;
+        float r[4];
+        rect_of(lists[l], r);
+        logf_("%s list at %.0f,%.0f %.0fx%.0f", l ? "game" : "first", r[0], r[1], r[2], r[3]);
+        for (int i = 0, c = unbox_int(invoke(ui.child_count, lists[l], NULL)); i < c && i < 8; ++i) {
+            void *slot = element_at(lists[l], i);
+            rect_of(slot, r);
+            logf_(" child %d at %.0f,%.0f %.0fx%.0f", i, r[0], r[1], r[2], r[3]);
+            for (int j = 0, cc = unbox_int(invoke(ui.child_count, slot, NULL)); j < cc; ++j) {
+                void *e = element_at(slot, j);
+                char cls[64] = "", bg[96], disp[16], vis[16], op[16];
+                void *list = field_obj(e, "m_ClassList");
+                if (list) {
+                    int zero = 0;
+                    void *za[] = { &zero };
+                    to_ascii(invoke(method(il_object_get_class(list), "get_Item", 1), list, za), cls, sizeof cls);
+                }
+                rect_of(e, r);
+                resolved(e, "backgroundImage", bg, sizeof bg);
+                resolved(e, "display", disp, sizeof disp);
+                resolved(e, "visibility", vis, sizeof vis);
+                resolved(e, "opacity", op, sizeof op);
+                logf_("   %s at %.0f,%.0f %.0fx%.0f bg %s display %s visibility %s opacity %s", cls, r[0], r[1], r[2],
+                      r[3], bg, disp, vis, op);
             }
         }
-        g_vrm_task = NULL;
-        return;
     }
-    char path[512];
-    FILE *f = fopen(RUN_DIR "dmhook.vrm", "r");
-    if (!f) return;
-    if (!fgets(path, sizeof path, f)) path[0] = 0;
-    fclose(f);
-    DeleteFileA(RUN_DIR "dmhook.vrm");
-    path[strcspn(path, "\r\n")] = 0;
-    void *vrm10 = find_class("UniVRM10", "Vrm10"), *gen = find_class("UniVRM10", "UrpVrm10MaterialDescriptorGenerator");
-    if (!vrm10 || !gen) return;
-    void *material = NULL;
-    if (GetFileAttributesA(RUN_DIR "dmhook.vrm-urp") != INVALID_FILE_ATTRIBUTES) {
-        material = il_object_new(gen);
-        invoke(method(gen, ".ctor", 0), material, NULL);
-    }
-    uint8_t vrm0x = 1, show = 1;
-    int rig = 0; /* ControlRigGenerationOption.None */
-    uint64_t token = 0;
-    void *args[] = { il_string_new(path), &vrm0x, &rig, &show, NULL, material, NULL, NULL, &token };
-    g_vrm_task = invoke(method(vrm10, "LoadPathAsync", 9), NULL, args);
-    if (g_vrm_task) il_gchandle_new(g_vrm_task, 0);
-    logf_("vrm: loading %s, task %p", path, g_vrm_task);
+    inspect_characters();
 }
 
 /* runs on the game's main thread */
@@ -1492,8 +2349,12 @@ static void tick(void)
     if (ready < 0) return;
     dump_request();
     inspect_request();
-    vrm_request();
     tick_bright();
+    slots_diag();
+    mods_tick();
+    worn_tick();
+    face_tick();
+    vrm_diag();
 
     /* the game builds every page at start; rebuild ours if it ever goes away */
     if (!g_section || !invoke(ui.get_parent, g_section, NULL)) {
@@ -1578,7 +2439,7 @@ static DWORD WINAPI worker(void *arg)
             held = now;
             PostMessageW(hooked, WM_DMHOOK, held ? 1 : 2, 0);
         }
-        if (waited >= (g_fast_ticks || g_face_mesh ? 30u : (DWORD)TICK_MS)) {
+        if (waited >= (g_watching ? 10u : g_faces ? 30u : (DWORD)TICK_MS)) {
             PostMessageW(hooked, WM_DMHOOK, 0, 0);
             waited = 0;
         }
