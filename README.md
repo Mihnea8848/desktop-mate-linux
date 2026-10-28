@@ -15,9 +15,9 @@ does not have, right inside the game's own settings:
 - Brightness per character
 - A battery saver, and smoother dragging on high refresh rate screens
 - Switches for window sitting and smooth animation
-- **Custom characters (in development):** load your own VRM models, listed in
-  the character menu above the DLC, and pick which character's animations and
-  voice they use
+- **Custom characters:** load your own VRM models from a "Mods" list in the
+  character menu. Each one moves and talks like a character you own, also with
+  Multi-Character
 
 ## Why I made this
 
@@ -44,6 +44,12 @@ they choose. This repository is for the Linux users.
   own settings page: brightness for each character under Character Settings,
   and a battery saver and switches for window sitting and smooth animation
   under Global Settings
+- Custom characters: "Add a VRM model" in the character menu copies a `.vrm`
+  file to `~/.local/share/desktop-mate-linux/characters` and puts it on the
+  character that is out. The gear on a mod changes its name and the character
+  whose animations and voice it uses, or deletes it. Faces follow the
+  character's blinking, expressions and lip sync, and shading is matched to the
+  game's own characters
 
 I run it every day on CachyOS, KDE Plasma 6.8.1 (Wayland), an NVIDIA RTX 4060
 and GE-Proton 11-11. Other setups are untested, so I would love to hear how it
@@ -57,6 +63,9 @@ goes on yours, good or bad.
   you switch windows, or after 8 seconds.
 - CPU use is high: about one core on my laptop.
 - Flatpak Steam is untested.
+- Custom characters are drawn with the game's MToon shader, so they look close
+  to the official characters but not the same. A VRM file the game cannot read
+  is skipped; the reason is in `/dev/shm/ghost-bridge/dmhook.log`.
 
 ## Install
 
@@ -190,13 +199,12 @@ that runs inside the game's Wine session. The helper creates an invisible copy
 of each window there, so the game sees your desktop as if it were on Windows,
 and sends the game's moves and minimizes back to KWin. GE-Proton's overlay
 patch provides the transparency, and a small library loaded into the game adds
-the Linux Patch Settings section to its settings page. The details, and
+the Linux Patch Settings section to its settings page and loads custom
+characters with the VRM loader the game already ships. The details, and
 everything I measured, are in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Roadmap
 
-- Custom characters from your own VRM files, in a "Mods" category of the
-  character menu, using the animations and voice of a character you own
 - Hyprland and sway support
 - The GE-Proton fixes merged upstream, so no custom build is needed
 

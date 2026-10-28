@@ -116,6 +116,49 @@ than on Windows: compared with the store screenshots, colors match within the
 differences that pose and JPEG compression explain. If anything is not found after a game update, the library writes the
 reason to `dmhook.log` and does nothing else.
 
+## Custom characters
+
+The game still ships UniVRM 1.0, the VRM loader from its custom character days,
+so `dmhook.dll` loads a model with `Vrm10.LoadPathAsync` (VRM 0.x files are
+migrated by UniVRM). UniVRM's URP material generator throws inside the game, so
+the default one is used and every material is then moved to the game's own
+`Hidden/DesktopMate MToon` shader, which keeps all MToon settings.
+
+A loaded model is put on a character that is out, not next to her:
+
+- It gets her parent, place and rotation (turned 180 degrees, VRM 1.0 faces the
+  other way), is scaled to her hip height (`Animator.humanScale`) so it sits on
+  windows at the same spot, and goes on the layer her camera draws.
+- `UniHumanoid.HumanPoseTransfer` copies her pose to it every frame. Her own
+  meshes are hidden, so her skeleton keeps running the game's animations, IK,
+  colliders and voice.
+- Her face blend shapes (blinks, the mouth shapes of the lip sync, wink, angry,
+  sad, surprised) drive the model's VRM expressions every 30 ms.
+- Shading is matched to her lilToon materials: shadow edge at half-lambert
+  0.36 with blur 0.14 (MToon shift 0.28, toony 0.86), a 30% rim light, no
+  real-time shadows received. A model without a shade texture shades its main
+  texture with lilToon's default shadow tint; otherwise its shadows stayed
+  invisible.
+
+The Mods list is built above the game's character list with the same layout
+classes (`character-slot`, the green `character-slot__choice-icon`). Each
+`.vrm` in `~/.local/share/desktop-mate-linux/characters` is a mod with a name
+(by default the one in the model's metadata), a base character and an on/off
+state, saved in `characters.conf` next to `game.conf`. The base character is
+the one whose animations and voice the mod uses. "Add a VRM model" asks
+`launch.sh` for a file through `/dev/shm/ghost-bridge/pick-vrm`, since neither
+Wine nor Steam's container has a file dialog that fits; `launch.sh` opens
+kdialog or zenity on the host and copies the file into the folder.
+
+Turning a mod on loads the model hidden first, then presses the base
+character's own slot button (`Clickable.Invoke`) and puts the model on her as
+soon as her model exists, so the original never shows. Turning it off with
+other characters out dismisses her the same way and keeps the model until the
+game removes her. Who is out comes from the scene: the game's
+`CharacterSlot/N` preferences are not cleared when a character is dismissed.
+A character's animator is matched to the game's id by how alike the names are,
+because they differ (`Cha_TurumakiMaki` for `Release/AHS_TsurumakiMaki`).
+
 ## Smooth animation
 
 GE-Proton draws the game into a hidden window and copies each frame to the

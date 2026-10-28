@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * dmhook.dll: loaded into DesktopMate.exe by ghost.exe. Adds a "Linux" section
- * to the game's settings page and saves it to game.conf for launch.sh, and a
- * per-character brightness slider to the character settings.
+ * to the game's settings page and saves it to game.conf for launch.sh, a
+ * per-character brightness slider to the character settings, and custom
+ * characters (VRM models) to the character menu.
  *
  * The game renames its il2cpp API exports and crashes callers outside
  * GameAssembly.dll and UnityPlayer.dll. il2cpp-map.txt (scripts/il2cpp-map.py)
@@ -12,8 +13,9 @@
  * own classes are renamed too, so only Unity classes and the UI element names
  * from the game's layout files are used.
  *
- * Debugging: write an element name to /dev/shm/ghost-bridge/dmhook.dump and the
- * subtree is written to dmhook.log.
+ * Debugging: write an element name (and optionally a depth) to
+ * /dev/shm/ghost-bridge/dmhook.dump and the subtree is written to dmhook.log;
+ * "*" dumps every UI document.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -132,13 +134,8 @@ static void *(*il_class_get_methods)(void *, void **);
 static const char *(*il_method_get_name)(void *);
 static uint32_t (*il_method_get_param_count)(void *);
 static void *(*il_method_get_param)(void *, uint32_t);
-static void *(*il_method_get_return_type)(void *);
-static uint32_t (*il_method_get_flags)(void *, uint32_t *);
 static char *(*il_type_get_name)(void *);
 static void *(*il_class_get_parent)(void *);
-static void *(*il_class_get_fields)(void *, void **);
-static const char *(*il_field_get_name)(void *);
-static void *(*il_field_get_type)(void *);
 static void (*il_field_set_value)(void *, void *, void *);
 
 static int resolve_api(void)
@@ -149,8 +146,7 @@ static int resolve_api(void)
     R(object_get_class) R(object_unbox) R(object_new) R(runtime_invoke) R(string_new)
     R(string_chars) R(string_length) R(class_get_field_from_name) R(field_get_value)
     R(gchandle_new) R(gchandle_free) R(class_get_methods) R(method_get_name) R(method_get_param_count)
-    R(method_get_param) R(method_get_return_type) R(method_get_flags) R(type_get_name) R(class_get_parent)
-    R(class_get_fields) R(field_get_name) R(field_get_type) R(field_set_value)
+    R(method_get_param) R(type_get_name) R(class_get_parent) R(field_set_value)
 #undef R
     return 1;
 }
@@ -704,116 +700,6 @@ static void *children_of_type(void *comp, void *cls)
     return invoke(method_typed(find_class("UnityEngine", "Component"), "GetComponentsInChildren", 2, sig), comp, a);
 }
 
-/* Inspection for the custom character work: write anything to
- * /dev/shm/ghost-bridge/dmhook.inspect. Lists the VRM runtime's classes and
- * methods and the structure of the characters in the scene. */
-static void inspect_class(const char *ns, const char *name)
-{
-    size_t n = 0;
-    void **asms = il_domain_get_assemblies(il_domain_get(), &n), *k = NULL;
-    for (size_t i = 0; i < n && !k; ++i) k = il_class_from_name(il_assembly_get_image(asms[i]), ns, name);
-    if (!k) {
-        logf_("class %s.%s: missing", ns, name);
-        return;
-    }
-    logf_("class %s.%s (base %s)", ns, name, il_class_get_parent(k) ? il_class_get_name(il_class_get_parent(k)) : "-");
-    void *fiter = NULL, *f;
-    while ((f = il_class_get_fields(k, &fiter)))
-        logf_("  field %s %s", il_type_get_name(il_field_get_type(f)), il_field_get_name(f));
-    void *iter = NULL, *m;
-    while ((m = il_class_get_methods(k, &iter))) {
-        char sig[600];
-        int o = 0;
-        uint32_t iflags = 0, flags = il_method_get_flags(m, &iflags);
-        for (uint32_t i = 0, c = il_method_get_param_count(m); i < c && o < 500; ++i)
-            o += snprintf(sig + o, sizeof sig - o, "%s%s", i ? ", " : "", il_type_get_name(il_method_get_param(m, i)));
-        sig[o] = 0;
-        logf_("  %s%s %s(%s)", flags & 0x10 ? "static " : "", il_type_get_name(il_method_get_return_type(m)),
-              il_method_get_name(m), sig);
-    }
-}
-
-static void inspect_characters(void)
-{
-    void *animator = find_class("UnityEngine", "Animator"), *component = find_class("UnityEngine", "Component");
-    void *transform = find_class("UnityEngine", "Transform"), *smr = find_class("UnityEngine", "SkinnedMeshRenderer");
-    void *go = find_class("UnityEngine", "GameObject");
-    int none = 0;
-    void *args[] = { il_type_get_object(il_class_get_type(animator)), &none };
-    void *arr = invoke(ui.find_objects, NULL, args);
-    uintptr_t n = arr ? *(uintptr_t *)((char *)arr + 0x18) : 0;
-    logf_("animators: %lu (class %p, array %p)", (unsigned long)n, animator, arr);
-    for (uintptr_t i = 0; i < n; ++i) {
-        void *a = ((void **)((char *)arr + 0x20))[i];
-        char path[512] = "", name[96];
-        void *t = invoke(method(component, "get_transform", 0), a, NULL);
-        for (int d = 0; t && d < 12; ++d) {
-            to_ascii(invoke(method(ui.object, "get_name", 0), t, NULL), name, sizeof name);
-            char tmp[512];
-            snprintf(tmp, sizeof tmp, "/%s%s", name, path);
-            snprintf(path, sizeof path, "%s", tmp);
-            t = invoke(method(transform, "get_parent", 0), t, NULL);
-        }
-        void *ctl = invoke(method(animator, "get_runtimeAnimatorController", 0), a, NULL);
-        char ctlname[96] = "-";
-        if (ctl) to_ascii(invoke(method(ui.object, "get_name", 0), ctl, NULL), ctlname, sizeof ctlname);
-        void *human = invoke(method(animator, "get_isHuman", 0), a, NULL);
-        void *en = invoke(method(find_class("UnityEngine", "Behaviour"), "get_enabled", 0), a, NULL);
-        void *g = invoke(method(component, "get_gameObject", 0), a, NULL);
-        void *layer = g ? invoke(method(go, "get_layer", 0), g, NULL) : NULL;
-        void *meshes = children_of_type(a, smr);
-        logf_("  %s: controller %s, human %d, enabled %d, layer %d, skinned meshes %lu", path, ctlname,
-              human ? *(uint8_t *)il_object_unbox(human) : -1, en ? *(uint8_t *)il_object_unbox(en) : -1,
-              layer ? *(int32_t *)il_object_unbox(layer) : -1,
-              meshes ? (unsigned long)*(uintptr_t *)((char *)meshes + 0x18) : 0UL);
-    }
-}
-
-static void inspect_request(void)
-{
-    FILE *f = fopen(RUN_DIR "dmhook.inspect", "r");
-    if (!f) return;
-    /* lines "Namespace Class" pick the classes; an empty file lists the defaults */
-    char ns[96], cn[96];
-    int listed = 0;
-    while (fscanf(f, "%95s %95s", ns, cn) == 2) {
-        listed++;
-        if (strcmp(ns, "go")) {
-            inspect_class(ns, cn);
-            continue;
-        }
-        /* "go NAME": the classes of the components on that GameObject */
-        void *go_class = find_class("UnityEngine", "GameObject"), *component = find_class("UnityEngine", "Component");
-        void *na[] = { il_string_new(cn) };
-        void *go = invoke(method(go_class, "Find", 1), NULL, na);
-        static const char *const tsig[] = { "System.Type" };
-        void *ta[] = { il_type_get_object(il_class_get_type(component)) };
-        void *cs = go ? invoke(method_typed(go_class, "GetComponents", 1, tsig), go, ta) : NULL;
-        uintptr_t n = cs ? *(uintptr_t *)((char *)cs + 0x18) : 0;
-        logf_("gameobject %s: %p, %lu components", cn, go, (unsigned long)n);
-        for (uintptr_t i = 0; i < n; ++i) {
-            void *k = il_object_get_class(((void **)((char *)cs + 0x20))[i]);
-            logf_("component %s", il_class_get_name(k));
-            void *iter = NULL, *m;
-            while ((m = il_class_get_methods(k, &iter))) logf_("  %s/%u", il_method_get_name(m), il_method_get_param_count(m));
-        }
-    }
-    fclose(f);
-    DeleteFileA(RUN_DIR "dmhook.inspect");
-    if (listed) return;
-    static const char *classes[][2] = {
-        { "UniVRM10", "Vrm10" }, { "UniVRM10", "Vrm10Data" }, { "UniVRM10", "Vrm10Importer" },
-        { "UniVRM10", "Vrm10Instance" }, { "UniVRM10", "Vrm10Runtime" }, { "UniVRM10", "MigrationVrm" },
-        { "UniVRM10", "UrpVrm10MaterialDescriptorGenerator" }, { "UniGLTF", "GlbFileParser" },
-        { "UniGLTF", "GltfData" }, { "UniGLTF", "RuntimeGltfInstance" }, { "UniGLTF", "ImporterContextExtensions" },
-        { "VRMShaders", "ImmediateCaller" }, { "VRMShaders", "RuntimeOnlyAwaitCaller" },
-        { "UniHumanoid", "HumanPoseTransfer" }, { "UniVRM10", "ControlRigGenerationOption" },
-        { "UniVRM10", "Vrm10RuntimeExpression" }, { "UniVRM10", "ExpressionKey" }, { "UniVRM10", "ExpressionPreset" },
-    };
-    for (size_t i = 0; i < sizeof classes / sizeof classes[0]; ++i) inspect_class(classes[i][0], classes[i][1]);
-    inspect_characters();
-}
-
 /* Her face drives the VRM's expressions: each VRM preset follows the
  * strongest of her matching blendshapes (0..100 -> 0..1). */
 static const struct { const char *preset; const char *shapes[6]; } g_face_map[] = {
@@ -1253,141 +1139,6 @@ static void vrm_attach(struct worn *w)
           (unsigned long)nr);
 }
 
-static void describe_renderers(const char *what, void *comp)
-{
-    void *component = find_class("UnityEngine", "Component"), *renderer = find_class("UnityEngine", "Renderer");
-    void *go = find_class("UnityEngine", "GameObject"), *material = find_class("UnityEngine", "Material");
-    void *shader = find_class("UnityEngine", "Shader");
-    void *rs = children_of_type(comp, renderer);
-    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
-    logf_("%s: %lu renderers", what, (unsigned long)n);
-    for (uintptr_t i = 0; i < n && i < 6; ++i) {
-        void *r = ((void **)((char *)rs + 0x20))[i];
-        void *g = invoke(method(component, "get_gameObject", 0), r, NULL);
-        void *layer = invoke(method(go, "get_layer", 0), g, NULL);
-        void *b = invoke(method(renderer, "get_bounds", 0), r, NULL);
-        float *bv = b ? il_object_unbox(b) : NULL;
-        void *m = invoke(method(renderer, "get_sharedMaterial", 0), r, NULL);
-        void *sh = m ? invoke(method(material, "get_shader", 0), m, NULL) : NULL;
-        char name[64] = "", sname[96] = "";
-        to_ascii(invoke(method(ui.object, "get_name", 0), g, NULL), name, sizeof name);
-        if (sh) to_ascii(invoke(method(shader, "get_name", 0), sh, NULL), sname, sizeof sname);
-        logf_("  %s layer %d center (%.2f %.2f %.2f) size (%.2f %.2f %.2f) shader %s", name,
-              layer ? *(int *)il_object_unbox(layer) : -1, bv ? bv[0] : 0, bv ? bv[1] : 0, bv ? bv[2] : 0,
-              bv ? bv[3] * 2 : 0, bv ? bv[4] * 2 : 0, bv ? bv[5] * 2 : 0, sname);
-    }
-}
-
-/* the lilToon and MToon properties a material has, with their values; the
- * game strips property enumeration, so the names are listed here */
-static const char *const g_look_props[] = {
-    "_Color", "_AsUnlit", "_LightMinLimit", "_LightMaxLimit", "_BeforeExposureLimit", "_MonochromeLighting",
-    "_lilDirectionalLightStrength", "_UseShadow", "_ShadowStrength", "_ShadowColor", "_ShadowBorder", "_ShadowBlur",
-    "_ShadowNormalStrength", "_ShadowReceive", "_Shadow2ndColor", "_Shadow2ndBorder", "_Shadow2ndBlur",
-    "_Shadow3rdColor", "_ShadowBorderColor", "_ShadowBorderRange", "_ShadowMainStrength", "_ShadowEnvStrength",
-    "_ShadowAOShift", "_UseRim", "_RimColor", "_RimBorder", "_RimBlur", "_RimFresnelPower", "_RimEnableLighting",
-    "_RimShadowMask", "_UseRimShade", "_RimShadeColor", "_RimShadeBorder", "_RimShadeBlur", "_RimShadeFresnelPower",
-    "_UseBacklight", "_BacklightColor", "_UseMatCap", "_MatCapColor", "_MatCapBlend", "_UseEmission",
-    "_EmissionColor", "_OutlineColor", "_OutlineWidth", "_OutlineLitColor", "_OutlineEnableLighting",
-    "_OutlineFixWidth", "_OutlineVertexR2Width", "_Cull", "_Cutoff", "_ShadeColor", "_ShadingShiftFactor",
-    "_ShadingToonyFactor", "_GiEqualization", "_MatcapColor", "_RimLift", "_RimLightingMix", "_OutlineWidthMode",
-    "_OutlineLightingMix", "_M_CullMode", "_AlphaMode", "_ShadeShift", "_ShadeToony", "_LightColorAttenuation",
-    "_IndirectLightIntensity", "_OutlineScaledMaxDistance", "_OutlineColorMode", "_Brightness",
-};
-
-static void dump_material(const char *what, void *m)
-{
-    void *material = find_class("UnityEngine", "Material"), *shader = find_class("UnityEngine", "Shader");
-    void *sh = invoke(method(material, "get_shader", 0), m, NULL);
-    if (!sh) return;
-    char mname[64], sname[96];
-    to_ascii(invoke(method(ui.object, "get_name", 0), m, NULL), mname, sizeof mname);
-    to_ascii(invoke(method(shader, "get_name", 0), sh, NULL), sname, sizeof sname);
-    static const char *const s1[] = { "System.String" }, *const i1[] = { "System.Int32" };
-    void *has = method_typed(material, "HasProperty", 1, s1), *hasf = method_typed(material, "HasFloat", 1, i1);
-    void *gf = method_typed(material, "GetFloat", 1, s1), *gv = method_typed(material, "GetVector", 1, s1);
-    void *id = method_typed(shader, "PropertyToID", 1, s1);
-    void *kw = invoke(method(material, "get_shaderKeywords", 0), m, NULL);
-    char kws[400] = "";
-    uintptr_t nk = kw ? *(uintptr_t *)((char *)kw + 0x18) : 0;
-    for (uintptr_t i = 0, o = 0; i < nk && o < 380; ++i) {
-        char k[64];
-        to_ascii(((void **)((char *)kw + 0x20))[i], k, sizeof k);
-        o += snprintf(kws + o, sizeof kws - o, "%s ", k);
-    }
-    logf_("%s material %s, shader %s, %d passes, queue %d, keywords %s", what, mname, sname,
-          unbox_int(invoke(method(shader, "get_passCount", 0), sh, NULL)),
-          unbox_int(invoke(method(material, "get_renderQueue", 0), m, NULL)), kws);
-    char line[900];
-    int o = 0;
-    for (size_t i = 0; i < sizeof g_look_props / sizeof g_look_props[0]; ++i) {
-        void *a[] = { il_string_new(g_look_props[i]) };
-        void *h = invoke(has, m, a);
-        if (!h || !*(uint8_t *)il_object_unbox(h)) continue;
-        int pid = unbox_int(invoke(id, NULL, a));
-        void *ia[] = { &pid };
-        void *isf = invoke(hasf, m, ia);
-        if (isf && *(uint8_t *)il_object_unbox(isf)) {
-            void *r = invoke(gf, m, a);
-            o += snprintf(line + o, sizeof line - o, " %s=%.3g", g_look_props[i], r ? *(float *)il_object_unbox(r) : -1);
-        } else {
-            void *r = invoke(gv, m, a);
-            float *v = r ? il_object_unbox(r) : NULL;
-            if (v) o += snprintf(line + o, sizeof line - o, " %s=(%.2f %.2f %.2f %.2f)", g_look_props[i], v[0], v[1], v[2], v[3]);
-        }
-        if (o > 700) {
-            logf_(" %s", line);
-            o = 0;
-        }
-    }
-    if (o) logf_(" %s", line);
-}
-
-/* each distinct material under comp; one per shader when by_shader is set */
-static void dump_materials(const char *what, void *comp, int by_shader)
-{
-    void *renderer = find_class("UnityEngine", "Renderer"), *material = find_class("UnityEngine", "Material");
-    void *rs = children_of_type(comp, renderer);
-    uintptr_t n = rs ? *(uintptr_t *)((char *)rs + 0x18) : 0;
-    void *seen[24];
-    int nseen = 0;
-    for (uintptr_t i = 0; i < n && nseen < 24; ++i) {
-        void *ms = invoke(method(renderer, "get_sharedMaterials", 0), ((void **)((char *)rs + 0x20))[i], NULL);
-        uintptr_t nm = ms ? *(uintptr_t *)((char *)ms + 0x18) : 0;
-        for (uintptr_t j = 0; j < nm && nseen < 24; ++j) {
-            void *m = ((void **)((char *)ms + 0x20))[j];
-            void *key = m && by_shader ? invoke(method(material, "get_shader", 0), m, NULL) : m;
-            int dup = !key;
-            for (int k = 0; k < nseen && !dup; ++k) dup = seen[k] == key;
-            if (dup) continue;
-            seen[nseen++] = key;
-            char rn[64];
-            void *go = invoke(method(find_class("UnityEngine", "Component"), "get_gameObject", 0), ((void **)((char *)rs + 0x20))[i], NULL);
-            to_ascii(invoke(method(ui.object, "get_name", 0), go, NULL), rn, sizeof rn);
-            logf_("%s renderer %s:", what, rn);
-            dump_material(what, m);
-        }
-    }
-}
-
-/* touch dmhook.vrmdiag: renderers and look properties of the first worn VRM
- * and of the character wearing it */
-static void vrm_diag(void)
-{
-    if (GetFileAttributesA(RUN_DIR "dmhook.vrmdiag") == INVALID_FILE_ATTRIBUTES) return;
-    DeleteFileA(RUN_DIR "dmhook.vrmdiag");
-    for (int i = 0; i < MAX_WORN; ++i) {
-        struct worn *w = &g_worn[i];
-        if (!w->instance || !alive(w->her)) continue;
-        describe_renderers("character", w->her);
-        describe_renderers("vrm", w->instance);
-        dump_materials("character", w->her, 0);
-        dump_materials("vrm", w->instance, 0);
-        return;
-    }
-    logf_("vrmdiag: no VRM worn");
-}
-
 /* Mods: custom characters. Every .vrm in the characters folder is a mod with
  * a name and a base character, whose animations and voice it uses. A mod
  * that is on is worn by its base character whenever that character is out,
@@ -1749,20 +1500,6 @@ static void worn_tick(void)
         }
         if (w->waiting) {
             void *her = on ? find_animator_for(w->character) : NULL;
-            static DWORD said;
-            if (!her && now - said > 1000) {
-                said = now;
-                void *as[8], *animator = find_class("UnityEngine", "Animator");
-                int n = character_animators(as, 8);
-                char line[400] = "";
-                for (int k = 0, o = 0; k < n; ++k) {
-                    void *c = invoke(method(animator, "get_runtimeAnimatorController", 0), as[k], NULL);
-                    char ctl[96] = "-";
-                    if (c) to_ascii(invoke(method(ui.object, "get_name", 0), c, NULL), ctl, sizeof ctl);
-                    o += snprintf(line + o, sizeof line - o, " %s", ctl);
-                }
-                logf_("vrm: waiting for %s, characters:%s", w->character, line);
-            }
             if (her) {
                 w->her = keep(w, her);
                 w->waiting = 0;
@@ -2173,24 +1910,8 @@ static void edit_tick(void)
     rebuild_mods();
 }
 
-static void click_mod(int i);
-
 static void mods_tick(void)
 {
-    /* development: dmhook.click with a mod index clicks its card */
-    FILE *dev = fopen(RUN_DIR "dmhook.click", "r");
-    if (dev) {
-        int i = -1;
-        if (fscanf(dev, "%d", &i) != 1) i = -1;
-        fclose(dev);
-        DeleteFileA(RUN_DIR "dmhook.click");
-        if (i >= 0 && i < g_nmods) click_mod(i);
-        /* -1: the game's Multi-Character switch */
-        void *t = i == -1 ? find_in_documents("multi-chara-toggle") : NULL;
-        void *c = t ? invoke(method(find_class("UnityEngine.UIElements", "Button"), "get_clickable", 0), t, NULL) : NULL;
-        void *na[] = { NULL };
-        if (c) invoke(method(find_class("UnityEngine.UIElements", "Clickable"), "Invoke", 1), c, na);
-    }
     static DWORD last_scan;
     static int loaded;
     char picked[260] = "";
@@ -2255,85 +1976,6 @@ static void mods_tick(void)
     }
 }
 
-/* Character menu diagnostics: touch dmhook.slots. Layout, banner texture and
- * check icon state of the first slots, the saved slots and the characters in
- * the scene. */
-static float *rect_of(void *e, float out[4])
-{
-    void *r = invoke(method(ui.element, "get_worldBound", 0), e, NULL);
-    if (r) memcpy(out, il_object_unbox(r), 4 * sizeof(float));
-    else out[0] = out[1] = out[2] = out[3] = -1;
-    return out;
-}
-
-static void resolved(void *e, const char *prop, char *out, int size)
-{
-    char name[128];
-    snprintf(name, sizeof name, "UnityEngine.UIElements.IResolvedStyle.get_%s", prop);
-    void *m = il_class_get_method_from_name(ui.element, name, 0);
-    void *r = m ? invoke(m, e, NULL) : NULL;
-    if (!r) {
-        snprintf(out, size, "?");
-        return;
-    }
-    if (!strcmp(prop, "backgroundImage")) {
-        void **bg = il_object_unbox(r);
-        out[0] = 0;
-        for (int i = 0; i < 4 && !out[0]; ++i)
-            if (bg[i]) to_ascii(invoke(method(ui.object, "get_name", 0), bg[i], NULL), out, size);
-        if (!out[0]) snprintf(out, size, "none");
-    } else if (!strcmp(prop, "opacity")) {
-        snprintf(out, size, "%.2f", *(float *)il_object_unbox(r));
-    } else {
-        snprintf(out, size, "%d", *(int32_t *)il_object_unbox(r));
-    }
-}
-
-static void slots_diag(void)
-{
-    if (GetFileAttributesA(RUN_DIR "dmhook.slots") == INVALID_FILE_ATTRIBUTES) return;
-    DeleteFileA(RUN_DIR "dmhook.slots");
-    for (int i = 0; i < 6; ++i) {
-        char key[32], id[128];
-        snprintf(key, sizeof key, "CharacterSlot/%d", i);
-        void *a[] = { il_string_new(key) };
-        to_ascii(invoke(method(ui.prefs, "GetString", 1), NULL, a), id, sizeof id);
-        logf_("prefs %s = %s", key, id);
-    }
-    void *slots = find_in_documents("character-slots");
-    void *parent = slots ? invoke(ui.get_parent, slots, NULL) : NULL;
-    void *lists[] = { parent ? element_at(parent, 0) : NULL, slots };
-    for (int l = 0; l < 2; ++l) {
-        if (!lists[l]) continue;
-        float r[4];
-        rect_of(lists[l], r);
-        logf_("%s list at %.0f,%.0f %.0fx%.0f", l ? "game" : "first", r[0], r[1], r[2], r[3]);
-        for (int i = 0, c = unbox_int(invoke(ui.child_count, lists[l], NULL)); i < c && i < 8; ++i) {
-            void *slot = element_at(lists[l], i);
-            rect_of(slot, r);
-            logf_(" child %d at %.0f,%.0f %.0fx%.0f", i, r[0], r[1], r[2], r[3]);
-            for (int j = 0, cc = unbox_int(invoke(ui.child_count, slot, NULL)); j < cc; ++j) {
-                void *e = element_at(slot, j);
-                char cls[64] = "", bg[96], disp[16], vis[16], op[16];
-                void *list = field_obj(e, "m_ClassList");
-                if (list) {
-                    int zero = 0;
-                    void *za[] = { &zero };
-                    to_ascii(invoke(method(il_object_get_class(list), "get_Item", 1), list, za), cls, sizeof cls);
-                }
-                rect_of(e, r);
-                resolved(e, "backgroundImage", bg, sizeof bg);
-                resolved(e, "display", disp, sizeof disp);
-                resolved(e, "visibility", vis, sizeof vis);
-                resolved(e, "opacity", op, sizeof op);
-                logf_("   %s at %.0f,%.0f %.0fx%.0f bg %s display %s visibility %s opacity %s", cls, r[0], r[1], r[2],
-                      r[3], bg, disp, vis, op);
-            }
-        }
-    }
-    inspect_characters();
-}
-
 /* runs on the game's main thread */
 static void tick(void)
 {
@@ -2348,13 +1990,10 @@ static void tick(void)
     }
     if (ready < 0) return;
     dump_request();
-    inspect_request();
     tick_bright();
-    slots_diag();
     mods_tick();
     worn_tick();
     face_tick();
-    vrm_diag();
 
     /* the game builds every page at start; rebuild ours if it ever goes away */
     if (!g_section || !invoke(ui.get_parent, g_section, NULL)) {
