@@ -2,7 +2,10 @@
 
 Each section is also the text of the matching GitHub release.
 
-## Unreleased
+## v0.5.1
+
+Custom characters: your own VRM models in the character menu, worn by the
+characters you own. Also MSAA as the default anti-aliasing.
 
 ### Added
 
