@@ -98,6 +98,48 @@ keep_game_drive() {
     done
 }
 
+# "Add a VRM model" in the game's character menu: the hook asks through
+# $RUN/pick-vrm, the file dialog runs here on the host (Wine and Steam's
+# container have none that fits), the file is copied to the characters
+# folder and its name goes back in $RUN/pick-vrm.done.
+pick_vrm() {
+    f=''
+    if command -v kdialog >/dev/null; then
+        f=$(env -u LD_PRELOAD -u LD_LIBRARY_PATH kdialog --title 'Add a VRM model' \
+            --getopenfilename "$HOME" 'VRM models (*.vrm *.VRM)')
+    elif command -v zenity >/dev/null; then
+        f=$(env -u LD_PRELOAD -u LD_LIBRARY_PATH zenity --file-selection --title 'Add a VRM model' \
+            --file-filter='VRM models | *.vrm *.VRM')
+    else
+        env -u LD_PRELOAD -u LD_LIBRARY_PATH xdg-open "$MODS" >/dev/null 2>&1 &
+        log "no kdialog or zenity; opened $MODS, put .vrm files there"
+        return
+    fi
+    [ -n "$f" ] || return
+    name=$(basename "$f")
+    case "$name" in *.vrm) ;; *.VRM) name=${name%.VRM}.vrm ;; *) log "not a .vrm file: $f"; return ;; esac
+    [ "$(readlink -f "$f")" = "$(readlink -f "$MODS/$name")" ] || cp -f "$f" "$MODS/$name" || return
+    log "added character $name"
+    echo "$name"
+}
+
+serve_picker() {
+    i=0
+    until game_running; do
+        i=$((i + 1))
+        [ $i -gt 120 ] && return
+        sleep 1
+    done
+    while game_running; do
+        if [ -f "$RUN/pick-vrm" ]; then
+            rm -f "$RUN/pick-vrm"
+            pick_vrm >"$RUN/pick-vrm.tmp"
+            mv "$RUN/pick-vrm.tmp" "$RUN/pick-vrm.done"
+        fi
+        sleep 1
+    done
+}
+
 # shellcheck disable=SC2329 # called by the EXIT trap
 cleanup() {
     trap - EXIT INT TERM HUP
@@ -107,6 +149,7 @@ cleanup() {
         [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
     fi
     [ -n "$KPID" ] && kill "$KPID" 2>/dev/null
+    [ -n "$PICKPID" ] && kill "$PICKPID" 2>/dev/null
     python3 -I "$DIR/scripts/sync-autostart.py" >>"$LOG" 2>&1
     log "exit $(date '+%F %T')"
 }
@@ -127,6 +170,11 @@ main() {
     echo "launch $(date '+%F %T')" >"$LOG"
     # Wine hides HOME from Windows programs; tells the hook where game.conf goes
     echo "${CONF%/*}" >"$RUN/config-dir"
+    # custom characters (.vrm) for the Mods list in the character menu
+    MODS=${XDG_DATA_HOME:-$HOME/.local/share}/desktop-mate-linux/characters
+    mkdir -p "$MODS"
+    echo "$MODS" >"$RUN/characters-dir"
+    rm -f "$RUN/pick-vrm" "$RUN/pick-vrm.done"
 
     XSCALE=$(kreadconfig6 --file kwinrc --group Xwayland --key Scale 2>/dev/null)
     XSCALE=${XSCALE:-1}
@@ -212,7 +260,7 @@ main() {
         BRIDGE=''
     fi
 
-    DPID='' WPID='' KPID=''
+    DPID='' WPID='' KPID='' PICKPID=''
     trap cleanup EXIT
     trap 'exit 143' INT TERM HUP
 
@@ -220,6 +268,9 @@ main() {
         keep_game_drive &
         KPID=$!
     fi
+
+    serve_picker &
+    PICKPID=$!
 
     if [ -n "$BRIDGE" ]; then
         "$DIR/bin/ghost-bridged" >>"$LOG" 2>&1 &

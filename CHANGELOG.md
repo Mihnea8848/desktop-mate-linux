@@ -4,6 +4,18 @@ Each section is also the text of the matching GitHub release.
 
 ## Unreleased
 
+### Added
+
+- Custom characters. The character menu has a "Mods" list above the game's
+  characters: "Add a VRM model" opens a file dialog, and every model in
+  `~/.local/share/desktop-mate-linux/characters` gets a card. A mod is worn by
+  a character you own and uses her animations and voice; the gear on its card
+  changes its name and that character, or deletes it. Faces follow blinking,
+  expressions and lip sync, models are scaled to her height and shaded like
+  the game's characters. With Multi-Character each character out can wear a
+  different mod; a mod's character comes out already wearing it and leaves
+  wearing it. Choices are kept in `characters.conf`.
+
 ### Changed
 
 - The first start sets the game's anti-aliasing to MSAA (HQ), once. The other
