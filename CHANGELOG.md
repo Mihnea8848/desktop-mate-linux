@@ -2,7 +2,10 @@
 
 Each section is also the text of the matching GitHub release.
 
-## Unreleased
+## v0.5.2
+
+Stock GE-Proton 11-12 now gives smooth 60 FPS animation, so the custom
+GE-Proton build is no longer needed.
 
 ### Changed
 
