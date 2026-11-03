@@ -5,7 +5,7 @@
 # desktop-mate-linux COMMAND
 #   setup [--tool NAME]  point Desktop Mate in Steam at this copy (Steam closed)
 #   remove               undo setup
-#   build-proton [DIR]   build the GE-Proton copy with smoother animation
+#   build-proton [DIR]   smoother animation for GE-Proton 11-7 to 11-11
 #   update               install a newer release (installs made by get.sh)
 #   uninstall            undo setup and remove an install made by get.sh
 #   version              print the installed version

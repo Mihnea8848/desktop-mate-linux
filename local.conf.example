@@ -14,8 +14,8 @@
 # GE-Proton 11-7 and newer, or the character cannot attach to windows.
 #DM_GAME_TRANSPARENT=0
 
-# With a GE-Proton from tools/build-ge-proton.sh: copy every frame through an
-# offscreen window like stock GE-Proton does (default 1, draw directly).
+# GE-Proton 11-12 and newer: copy every frame through an offscreen window like
+# older GE-Proton does (default 1, draw directly).
 #DM_DIRECT=0
 
 # Write Unity's own log to /dev/shm/ghost-bridge/unity.log (the game turns it off).

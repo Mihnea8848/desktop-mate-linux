@@ -166,14 +166,16 @@ visible one. The copy often runs before the new frame has arrived, so some
 frames are shown twice and others are skipped: of 60 frames rendered per
 second, about 45 different ones reach the screen.
 
-The patches in `patches/ge-proton` add `WINE_LAYERED_OVERLAY_DIRECT=1`, which
+GE-Proton 11-12 and newer include my fix (GloriousEggroll/proton-ge-custom#897);
+`patches/ge-proton` keeps it for 11-11. It adds `WINE_LAYERED_OVERLAY_DIRECT=1`, which
 lets the game present straight into its ARGB window, so there is no copy to
 race. The click-through shape is then read from the window's composite pixmap,
 which also works for a window taller than the screen. `launch.sh` sets the
-variable by default; stock GE-Proton ignores it. I measured the difference by
-hashing the character's pixels about 700 times a second: with stock GE-Proton
-11-11 about 45 different frames per second reach the screen, with the patched
-build all 60 do, evenly spaced.
+variable by default; GE-Proton before 11-12 ignores it. I measured the
+difference by hashing the character's pixels about 700 times a second: with
+stock GE-Proton 11-11 about 45 different frames per second reach the screen,
+with the patched build and with stock 11-12 all 60 do, evenly spaced (under 1%
+of frames shown twice).
 
 ## Performance
 
@@ -189,6 +191,7 @@ percent of one core.
 | GE-Proton 11-7, `DM_FPS=30` | 30 | 75% | 15% | 16% |
 | GE-Proton 11-11, defaults | 60 | 88% | 10% | 22% |
 | GE-Proton 11-11 from `tools/build-ge-proton.sh` | 60 | 88% | 3% | 19% |
+| GE-Proton 11-12, defaults (later, `-job-worker-count 2`) | 60 | 96% | 3% | 18% |
 
 Unity job workers, measured later from `/proc` over 20 s for the whole game
 process, GE-Proton 11-11 from `tools/build-ge-proton.sh`:
@@ -203,15 +206,15 @@ What I found:
 
 - The game limits itself to 60 FPS. A DXVK frame cap on top of that only adds
   a busy thread, so `launch.sh` sets none unless `DM_FPS` asks for a lower rate.
-- The in-game graphics preset and anti-aliasing setting make no measurable
-  difference to CPU or GPU use. Ultra with SMAA looks best and costs the same
-  as Low.
+- The in-game graphics preset makes no measurable difference to CPU or GPU
+  use. Of the anti-aliasing modes, MSAA (HQ) looks best under Proton and costs
+  about 2 W of GPU power and no CPU, so the first start selects it.
 - Most of the game's CPU time is spent by the game itself, not by the frame
-  copy: drawing straight into the window (`tools/build-ge-proton.sh`) leaves
+  copy: drawing straight into the window (GE-Proton 11-12) leaves
   it unchanged and only lowers Xwayland.
 - With stock GE-Proton, Xwayland's share is mostly the click-through readback:
   the 2304x1296 window is taller than the screen, so the fast shared-memory
-  read fails and every sample goes over the X socket. The patched build reads
+  read fails and every sample goes over the X socket. GE-Proton 11-12 reads
   the window's pixmap instead.
 - Unity starts one job worker thread per CPU thread. Under Wine the idle
   workers spin, and 19 of them cost 0.6 of a core. `launch.sh` passes

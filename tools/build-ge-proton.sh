@@ -4,7 +4,8 @@
 #
 # build-ge-proton.sh [GE tool dir]: rebuilds winex11.so of an installed GE-Proton
 # with the patches in patches/ge-proton/<version> and installs the result as a
-# new compatibility tool "<version>-desktopmate" next to it.
+# new compatibility tool "<version>-desktopmate" next to it. Only for GE-Proton
+# 11-7 to 11-11: 11-12 and newer include the patches.
 # Default tool: compatibilitytools.d/Proton-GE Latest. Needs git, gcc, make,
 # flex, bison and the X11 development headers; about 1 GB in $GE_BUILD_DIR
 # (default ~/.cache/desktop-mate-linux/ge-build) and 10 to 15 minutes.
@@ -19,6 +20,13 @@ B=${GE_BUILD_DIR:-$HOME/.cache/desktop-mate-linux/ge-build}/$VER
 DEST=$TOOLS/$VER-desktopmate
 
 [ -n "$VER" ] || { echo "no GE-Proton version in $SRC/version" >&2; exit 1; }
+major=${VER#GE-Proton}
+minor=${major#*-}
+major=${major%-*}
+if [ "$major" -gt 11 ] || { [ "$major" -eq 11 ] && [ "$minor" -ge 12 ]; }; then
+    echo "$VER already includes these fixes; nothing to build. Select it in Steam or run \"desktop-mate-linux setup\"."
+    exit 0
+fi
 [ -d "$PATCHES" ] || { echo "no patches for $VER; supported: $(ls "$DIR/patches/ge-proton")" >&2; exit 1; }
 
 if [ ! -f "$B/build64/dlls/winex11.drv/winex11.so" ]; then

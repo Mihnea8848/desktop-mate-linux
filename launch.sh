@@ -204,8 +204,8 @@ main() {
     # GE-Proton layered overlay patch: ARGB window, click-through shape from alpha
     export WINE_LAYERED_OVERLAY_ALPHA=1
     export WINE_LAYERED_OVERLAY_SHAPE_INTERVAL="${DM_SHAPE_INTERVAL:-200}"
-    # builds from tools/build-ge-proton.sh: present straight into the window
-    # instead of copying each frame (stock GE-Proton ignores it)
+    # GE-Proton 11-12 and newer, and builds from tools/build-ge-proton.sh:
+    # present straight into the window instead of copying each frame
     export WINE_LAYERED_OVERLAY_DIRECT="${DM_DIRECT:-1}"
 
     # the game limits itself to 60 FPS; DXVK's limiter costs CPU, so only use
