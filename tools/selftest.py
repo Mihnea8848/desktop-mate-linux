@@ -210,7 +210,7 @@ def main():
     doubled = frame_pacing()
     report("animation reaches the screen at the full frame rate",
            doubled is not None and doubled < 0.05,
-           f"{doubled:.0%} of frames shown twice; see tools/build-ge-proton.sh" if doubled is not None else "")
+           f"{doubled:.0%} of frames shown twice; needs GE-Proton 11-12 or newer" if doubled is not None else "")
 
     dialog = subprocess.Popen(["kdialog", "--title", TITLE, "--msgbox", "selftest"], env=ENV)
     try:

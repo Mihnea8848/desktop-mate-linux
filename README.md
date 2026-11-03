@@ -52,7 +52,7 @@ they choose. This repository is for the Linux users.
   game's own characters
 
 I run it every day on CachyOS, KDE Plasma 6.8.1 (Wayland), an NVIDIA RTX 4060
-and GE-Proton 11-11. Other setups are untested, so I would love to hear how it
+and GE-Proton 11-12. Other setups are untested, so I would love to hear how it
 goes on yours, good or bad.
 
 ## Known problems
@@ -70,7 +70,7 @@ goes on yours, good or bad.
 ## Install
 
 You need Steam with Desktop Mate installed, KDE Plasma 6 on Wayland, and
-GE-Proton 11-7 or newer. Install GE-Proton with
+GE-Proton 11-12 or newer. Install GE-Proton with
 [ProtonPlus](https://github.com/Vysp3r/ProtonPlus) or
 [ProtonUp-Qt](https://github.com/DavidoTek/ProtonUp-Qt).
 
@@ -133,21 +133,21 @@ git clone https://github.com/Mihnea8848/desktop-mate-linux.git
 cd desktop-mate-linux && ./build.sh
 ```
 
-### Smoother animation (optional)
+### Older GE-Proton
 
-Stock GE-Proton loses about a quarter of the frames on the way to the screen,
-so she moves at about 45 FPS. `tools/build-ge-proton.sh` rebuilds one library
-of your GE-Proton with my fix and installs it as a separate compatibility tool,
-for example `GE-Proton11-11-desktopmate`. With it all 60 frames arrive and the
-desktop uses less CPU.
+GE-Proton 11-12 and newer include my fix for smooth animation. With 11-7 to
+11-11 she works, but moves at about 45 FPS because a quarter of the frames get
+lost on the way to the screen. Update GE-Proton if you can. If you have to
+stay on one of those versions, `tools/build-ge-proton.sh` rebuilds one library
+of it with the fix and installs it as a separate compatibility tool, for
+example `GE-Proton11-11-desktopmate`:
 
 ```sh
 sudo pacman -S --needed git base-devel flex bison libx11 libxext libxcomposite wayland
 tools/build-ge-proton.sh
 ```
 
-Then restart Steam and run `desktop-mate-linux setup` again. I am working on getting this
-fix into GE-Proton itself.
+Then restart Steam and run `desktop-mate-linux setup` again.
 
 ## Settings
 
@@ -206,7 +206,6 @@ everything I measured, are in [docs/how-it-works.md](docs/how-it-works.md).
 ## Roadmap
 
 - Hyprland and sway support
-- The GE-Proton fixes merged upstream, so no custom build is needed
 
 ## Contributing
 

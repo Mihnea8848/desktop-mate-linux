@@ -2,6 +2,18 @@
 
 Each section is also the text of the matching GitHub release.
 
+## Unreleased
+
+### Changed
+
+- GE-Proton 11-12 and newer include my smooth animation fix
+  (GloriousEggroll/proton-ge-custom#897), so a stock GE-Proton from ProtonPlus
+  now gives all 60 frames and the lower Xwayland CPU use. Measured on 11-12:
+  60 FPS, under 1% of frames shown twice, Xwayland 3% of a core, the same as
+  the custom build. `desktop-mate-linux setup` prefers GE-Proton 11-12 or
+  newer over a custom build, and `desktop-mate-linux build-proton` is only
+  needed for GE-Proton 11-7 to 11-11.
+
 ## v0.5.1
 
 Custom characters: your own VRM models in the character menu, worn by the

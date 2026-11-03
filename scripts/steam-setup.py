@@ -17,6 +17,7 @@ import sys
 
 APP = "3301060"
 MIN_GE = (11, 7)
+UPSTREAM_GE = (11, 12)  # first GE-Proton with the smooth animation fix
 TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|([{}])|//[^\n]*|\s+')
 
 
@@ -112,14 +113,15 @@ def tool_name(tool_dir):
 
 
 def pick_tool(steam):
-    """A build from tools/build-ge-proton.sh, else the newest GE-Proton 11-7+; a ProtonPlus
-    "Latest" build wins a tie, it updates itself."""
+    """The newest GE-Proton 11-12+, which has the smooth animation fix; without one, a
+    build from tools/build-ge-proton.sh, else the newest 11-7+. A ProtonPlus "Latest"
+    build wins a tie, it updates itself."""
     best = None
     for d in glob.glob(os.path.join(steam, "compatibilitytools.d", "*")):
         v, name = ge_version(d), tool_name(d)
         if not v or not name or v < MIN_GE:
             continue
-        rank = (name.endswith("-desktopmate"), v, "latest" in name.lower())
+        rank = (v >= UPSTREAM_GE, v, name.endswith("-desktopmate"), "latest" in name.lower())
         if not best or rank > best[0]:
             best = (rank, name)
     return best[1] if best else None
