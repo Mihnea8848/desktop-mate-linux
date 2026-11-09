@@ -2,6 +2,18 @@
 
 Each section is also the text of the matching GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- Desktop Mate 1.17 (November 5) came up as an ordinary window with a Wine
+  title bar, cut to the screen height, and a character dragged to another
+  monitor came back from the opposite edge of the same one. The game now
+  grabs a hidden Wine helper window instead of its own; the hook keeps that
+  window out of the game's window lookup, so the game window is borderless
+  and moves between monitors again. The hook also answers the monitor scale
+  query that 1.17 added and Wine does not support.
+
 ## v0.5.2
 
 Stock GE-Proton 11-12 now gives smooth 60 FPS animation, so the custom
