@@ -5,7 +5,8 @@
  * dmhook.dll: loaded into DesktopMate.exe by ghost.exe. Adds a "Linux" section
  * to the game's settings page and saves it to game.conf for launch.sh, a
  * per-character brightness slider to the character settings, and custom
- * characters (VRM models) to the character menu.
+ * characters (VRM models) to the character menu. It also covers two Wine
+ * differences the game runs into since version 1.17 (patch_user32).
  *
  * The game renames its il2cpp API exports and crashes callers outside
  * GameAssembly.dll and UnityPlayer.dll. il2cpp-map.txt (scripts/il2cpp-map.py)
@@ -2087,11 +2088,78 @@ static DWORD WINAPI worker(void *arg)
     return 0;
 }
 
+/* Replaces the first bytes of a user32 export with a jump to `to`. The
+   original is never called again, so no trampoline is needed. */
+static void redirect(const char *name, void *to)
+{
+    uint8_t *f = (uint8_t *)GetProcAddress(GetModuleHandleA("user32.dll"), name);
+    if (!f) return;
+    uint8_t jmp[12] = { 0x48, 0xb8 };     /* mov rax, to; jmp rax */
+    memcpy(jmp + 2, &to, sizeof to);
+    jmp[10] = 0xff;
+    jmp[11] = 0xe0;
+    DWORD old;
+    if (!VirtualProtect(f, sizeof jmp, PAGE_EXECUTE_READWRITE, &old)) return;
+    memcpy(f, jmp, sizeof jmp);
+    VirtualProtect(f, sizeof jmp, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), f, sizeof jmp);
+}
+
+/* Since 1.17 the game reads each monitor's scale with the undocumented
+   DISPLAYCONFIG_DEVICE_INFO_GET_DPI_SCALE (-3) request, which Wine rejects
+   with ERROR_INVALID_PARAMETER. Answer it like Windows at the recommended
+   scale (all values 0) and pass every other request on to win32u. */
+typedef LONG (WINAPI *devinfo_fn)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
+static devinfo_fn g_devinfo;
+
+static LONG WINAPI devinfo(DISPLAYCONFIG_DEVICE_INFO_HEADER *h)
+{
+    if (h && (int)h->type == -3 && h->size >= sizeof *h + 3 * sizeof(INT32)) {
+        memset(h + 1, 0, 3 * sizeof(INT32));
+        return ERROR_SUCCESS;
+    }
+    return g_devinfo(h);
+}
+
+/* Since 1.17 the game also creates a message window on a second thread, and
+   Wine gives that thread a "Default IME" window above the game window. The
+   game and LibUniWinC both take the first window of the process from
+   EnumWindows as their own, so they made the IME window borderless and moved
+   it instead of the game window. Hide the process's windows other than
+   UnityWndClass from EnumWindows; windows of other processes are unchanged. */
+struct enum_filter { WNDENUMPROC cb; LPARAM lp; DWORD pid; };
+
+static BOOL CALLBACK filter_window(HWND h, LPARAM lp)
+{
+    struct enum_filter *f = (struct enum_filter *)lp;
+    DWORD pid = 0;
+    WCHAR cls[32];
+    GetWindowThreadProcessId(h, &pid);
+    if (pid == f->pid && (!GetClassNameW(h, cls, 32) || wcscmp(cls, L"UnityWndClass")))
+        return TRUE;
+    return f->cb(h, f->lp);
+}
+
+static BOOL WINAPI enum_windows(WNDENUMPROC cb, LPARAM lp)
+{
+    struct enum_filter f = { cb, lp, GetCurrentProcessId() };
+    return EnumDesktopWindows(NULL, filter_window, (LPARAM)&f);
+}
+
+static void patch_user32(void)
+{
+    HMODULE w = LoadLibraryA("win32u.dll");
+    g_devinfo = w ? (devinfo_fn)GetProcAddress(w, "NtUserDisplayConfigGetDeviceInfo") : NULL;
+    if (g_devinfo) redirect("DisplayConfigGetDeviceInfo", (void *)devinfo);
+    redirect("EnumWindows", (void *)enum_windows);
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
 {
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
+        patch_user32();
         CloseHandle(CreateThread(NULL, 0, worker, NULL, 0, NULL));
     }
     return TRUE;

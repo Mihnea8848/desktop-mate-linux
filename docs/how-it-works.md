@@ -20,6 +20,17 @@ coordinate. The prefix gets `Managed=N` for `DesktopMate.exe`, so the window is
 not managed by KWin and keeps the size the game asked for. `ensure-prefix.py`
 writes that setting on every launch.
 
+Its own window. Since game version 1.17 the game creates a message window on
+a second thread, and Wine gives that thread a hidden "Default IME" window that
+sits above the game window. The game and its LibUniWinC plugin both take the
+first window of the process from `EnumWindows` as their own, so they made the
+IME window borderless and transparent and moved it instead of the game window:
+the game window kept a Wine title bar, and dragging the character to another
+monitor moved nothing. `dmhook.dll` replaces `EnumWindows` inside the game so
+that the game's windows other than `UnityWndClass` are skipped. 1.17 also asks
+for each monitor's scale with an undocumented `DisplayConfigGetDeviceInfo`
+request that Wine rejects; `dmhook.dll` answers it like Windows at 100%.
+
 Other windows. The game finds windows with Win32 calls such as `EnumWindows`
 and `GetWindowRect`. Under Wine these only return Wine windows. The bridge
 copies the real desktop into Wine:
