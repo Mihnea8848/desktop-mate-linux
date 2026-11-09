@@ -2,7 +2,10 @@
 
 Each section is also the text of the matching GitHub release.
 
-## Unreleased
+## v0.5.3
+
+Works with Desktop Mate 1.17: the game window is borderless again and the
+character moves between monitors.
 
 ### Fixed
 
