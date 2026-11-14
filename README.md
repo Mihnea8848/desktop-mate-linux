@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="Desktop Mate on Linux" width="920">
+</p>
+
 # Desktop Mate on Linux
 
 [![Release](https://img.shields.io/github/v/release/Mihnea8848/desktop-mate-linux)](https://github.com/Mihnea8848/desktop-mate-linux/releases/latest)
