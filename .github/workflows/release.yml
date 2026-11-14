@@ -40,10 +40,13 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           files="dist/desktop-mate-linux-${GITHUB_REF_NAME}.tar.gz dist/SHA256SUMS"
           [ -f dist/SHA256SUMS.asc ] && files="$files dist/SHA256SUMS.asc"
+          # a tag with a hyphen (v0.5.4-beta.1) is a pre-release: get.sh and
+          # the pacman repository keep serving the latest full release
+          pre=; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; esac
           # shellcheck disable=SC2086
-          gh release create "$GITHUB_REF_NAME" $files --title "$GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$GITHUB_REF_NAME" $files $pre --title "$GITHUB_REF_NAME" --notes-file notes.md
       - name: Update the pacman repository
-        if: env.SIGNING_KEY != ''
+        if: env.SIGNING_KEY != '' && !contains(github.ref_name, '-')
         run: |
           gh release view repo >/dev/null 2>&1 ||
             gh release create repo --prerelease --title "pacman repository" \

@@ -20,12 +20,35 @@ if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
 fi
 
 printf '%s\n' "$notes" | sed -e '/./,$!d'
-cat <<'END'
+case "$tag" in
+*-*)
+    cat <<END
+
+## Trying this pre-release
+
+This is a pre-release. The pacman repository and the daily update of
+\`get.sh\` installs stay on the latest full release; install it on request:
+
+\`\`\`sh
+curl -fsSL https://raw.githubusercontent.com/Mihnea8848/desktop-mate-linux/main/get.sh | DML_TAG=$tag sh
+\`\`\`
+
+The daily update moves it to the full release once that is out. Tarball
+installs: extract the tarball and run \`./desktop-mate-linux setup\` with Steam
+closed.
+END
+    ;;
+*)
+    cat <<'END'
 
 ## Updating
 
 - Arch-based systems with the pacman repository: `sudo pacman -Syu`.
 - Tarball installs: extract the new tarball over the old folder, or into a new one and run `./desktop-mate-linux setup` again with Steam closed.
+END
+    ;;
+esac
+cat <<'END'
 
 ## Verifying the download
 
