@@ -114,6 +114,11 @@ installs it for the next start, keeping the previous version. Set
 `DM_UPDATE=off` to stop that, or run `desktop-mate-linux update` by hand.
 `desktop-mate-linux uninstall` removes it again.
 
+Releases marked "Pre-release" (tags like `v0.5.4-beta.1`) carry fixes I could
+not test on my own setup. Neither the pacman repository nor the daily update
+installs them. To try one, put `DML_TAG=v0.5.4-beta.1` in front of `sh` in
+the command above. The daily update then waits for the full release.
+
 You can also download a tarball from the
 [releases page](https://github.com/Mihnea8848/desktop-mate-linux/releases),
 extract it somewhere it can stay and run `./desktop-mate-linux setup` in that

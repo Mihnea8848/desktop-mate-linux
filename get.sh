@@ -35,6 +35,14 @@ main() {
     if [ "$mode" = --update ] && [ "$installed" = "$tag" ]; then
         return
     fi
+    # a pre-release (v0.5.4-beta.1) stays until its full release or a newer
+    # one is out, instead of going back to the latest full release
+    case "$mode:${DML_TAG:-}:$installed" in
+    --update::v*-*)
+        newest=$(printf '%s\n%s\n' "${installed%%-*}" "$tag" | sort -V | tail -n 1)
+        [ "$newest" = "$tag" ] || return 0
+        ;;
+    esac
 
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
