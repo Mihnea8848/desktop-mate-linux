@@ -2,6 +2,27 @@
 
 Each section is also the text of the matching GitHub release.
 
+## v0.5.4
+
+Fixes setups where the primary monitor is not the top left one, confirmed
+by the reporter after v0.5.4-beta.1.
+
+### Fixed
+
+- With a monitor left of or above the primary monitor, the pointer was
+  pulled to the bottom right corner of the primary monitor, clicks on it
+  barely worked, and characters sat below the windows they were put on.
+  Wine places the primary monitor at 0,0 and KWin places the top left
+  corner of the layout there, and the bridge passed KWin positions to Wine
+  unchanged. It now converts between the two (#23).
+
+### Changed
+
+- Releases with a hyphen in the tag (v0.5.4-beta.1) are pre-releases. The
+  pacman repository and the daily update of `get.sh` installs skip them;
+  `DML_TAG` installs one on request, and the daily update then waits for
+  its full release instead of going back.
+
 ## v0.5.4-beta.1
 
 Pre-release: a fix for setups where the primary monitor is not the top left
