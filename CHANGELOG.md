@@ -2,7 +2,11 @@
 
 Each section is also the text of the matching GitHub release.
 
-## Unreleased
+## v0.5.4-beta.1
+
+Pre-release: a fix for setups where the primary monitor is not the top left
+one. I could not test it with that layout, so the pacman repository and the
+daily update stay on v0.5.3 until it is confirmed.
 
 ### Fixed
 
