@@ -71,6 +71,17 @@ static int      g_game_transparent;
 static DWORD    g_active_changed;  /* tick count of the last real active-window change */
 static long     g_logsize;
 
+/* KWin and X use the same coordinates, with the top left corner of the
+ * screen layout at 0,0. Wine puts the primary monitor at 0,0 instead, so
+ * every X position is shifted by the virtual screen origin (negative when
+ * a monitor lies left of or above the primary one). Wine converts its own
+ * windows the same way (root_to_virtual_screen in winex11). */
+static int round_(double v) { return (int)(v < 0 ? v - 0.5 : v + 0.5); }
+static int wine_x(int x) { return round_(x * g_scale) + GetSystemMetrics(SM_XVIRTUALSCREEN); }
+static int wine_y(int y) { return round_(y * g_scale) + GetSystemMetrics(SM_YVIRTUALSCREEN); }
+static int kwin_x(int x) { return round_((x - GetSystemMetrics(SM_XVIRTUALSCREEN)) / g_scale); }
+static int kwin_y(int y) { return round_((y - GetSystemMetrics(SM_YVIRTUALSCREEN)) / g_scale); }
+
 static void logf_(const char *fmt, ...)
 {
     if (!g_log) return;
@@ -149,7 +160,7 @@ static void on_moved(HWND h, const WINDOWPOS *wpos)
     g->hold_until = GetTickCount() + HOLD_MS;
     char line[160];
     snprintf(line, sizeof line, "move\t%s\t%d\t%d\t%d\t%d", g->id,
-             (int)(x / g_scale + 0.5), (int)(y / g_scale + 0.5),
+             kwin_x(x), kwin_y(y),
              (int)(w / g_scale + 0.5), (int)(hh / g_scale + 0.5));
     send_cmd(line);
 }
@@ -211,8 +222,8 @@ static int parse_snapshot(char *buf, Rec *recs, int max)
         if (!id || !kind || n >= max) continue;
         Rec *r = &recs[n];
         memset(r, 0, sizeof *r);
-        r->x = (int)(atoi(xs) * g_scale + 0.5);
-        r->y = (int)(atoi(ys) * g_scale + 0.5);
+        r->x = wine_x(atoi(xs));
+        r->y = wine_y(atoi(ys));
         r->w = (int)(atoi(ws) * g_scale + 0.5);
         r->h = (int)(atoi(hs) * g_scale + 0.5);
         if (r->w <= 0 || r->h <= 0) continue;
@@ -433,8 +444,8 @@ static void follow_cursor(void)
     buf[got] = 0;
     POINT to;
     if (sscanf(buf, "%ld %ld", &to.x, &to.y) != 2) return;
-    to.x = (LONG)(to.x * g_scale);
-    to.y = (LONG)(to.y * g_scale);
+    to.x = wine_x(to.x);
+    to.y = wine_y(to.y);
 
     POINT cur;
     DWORD now = GetTickCount();
@@ -535,8 +546,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     wc.lpszClassName = L"Shell_TrayWnd";          RegisterClassW(&wc);
     wc.lpszClassName = L"Shell_SecondaryTrayWnd"; RegisterClassW(&wc);
 
-    logf_("start pid=%lu writeback=%d scale=%.2f game_transparent=%d", (unsigned long)GetCurrentProcessId(),
-          g_writeback, g_scale, g_game_transparent);
+    logf_("start pid=%lu writeback=%d scale=%.2f game_transparent=%d origin=%d,%d", (unsigned long)GetCurrentProcessId(),
+          g_writeback, g_scale, g_game_transparent,
+          GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
 
     /* wake on changes in the bridge dir instead of polling; fall back to
      * polling if change notifications are not available */

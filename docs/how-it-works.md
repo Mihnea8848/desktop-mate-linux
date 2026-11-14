@@ -50,6 +50,11 @@ KWin script  <--(commands)-----  ghost-bridged  <--(cmd files)----  ghost.exe
   `Shell_TrayWnd` windows. When the game moves or minimizes one of these
   windows, `ghost.exe` sends a command back and the KWin script applies it to
   the real window.
+- KWin numbers positions from the top left corner of the whole screen layout,
+  Wine from the top left corner of the primary monitor. `ghost.exe` adds the
+  Wine virtual screen origin to every KWin position and subtracts it again in
+  the commands, so the two match when a monitor lies left of or above the
+  primary one.
 
 The invisible windows have an empty window region and are also unmanaged, so
 they are never drawn and never receive input.

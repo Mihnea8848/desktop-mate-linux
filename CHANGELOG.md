@@ -2,6 +2,17 @@
 
 Each section is also the text of the matching GitHub release.
 
+## Unreleased
+
+### Fixed
+
+- With a monitor left of or above the primary monitor, the pointer was
+  pulled to the bottom right corner of the primary monitor, clicks on it
+  barely worked, and characters sat below the windows they were put on.
+  Wine places the primary monitor at 0,0 and KWin places the top left
+  corner of the layout there, and the bridge passed KWin positions to Wine
+  unchanged. It now converts between the two (#23).
+
 ## v0.5.3
 
 Works with Desktop Mate 1.17: the game window is borderless again and the
