@@ -1,5 +1,12 @@
 # Desktop Mate on Linux
 
+[![Release](https://img.shields.io/github/v/release/Mihnea8848/desktop-mate-linux)](https://github.com/Mihnea8848/desktop-mate-linux/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/Mihnea8848/desktop-mate-linux/ci.yml?branch=main&label=build)](https://github.com/Mihnea8848/desktop-mate-linux/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Mihnea8848/desktop-mate-linux)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/Mihnea8848/desktop-mate-linux/total)](https://github.com/Mihnea8848/desktop-mate-linux/releases)
+[![KDE Plasma 6, Wayland](https://img.shields.io/badge/KDE%20Plasma%206-Wayland-1d99f3?logo=kde&logoColor=white)](#what-works)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support%20me-ff5e5b?logo=kofi&logoColor=white)](https://ko-fi.com/mihnea8848)
+
 Run [Desktop Mate](https://store.steampowered.com/app/3301060/Desktop_Mate/),
 the desktop mascot from Steam, on Linux. She is drawn with a real transparent
 background, clicks go through to your apps, and she sits on your windows,
@@ -216,6 +223,9 @@ everything I measured, are in [docs/how-it-works.md](docs/how-it-works.md).
 
 Bug reports, test results from other hardware and pull requests are all
 welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+If this project is useful to you and you want to support it, you can buy me a
+coffee on [Ko-fi](https://ko-fi.com/mihnea8848).
 
 ## License
 
