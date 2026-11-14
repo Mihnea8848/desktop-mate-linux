@@ -1,4 +1,15 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="Desktop Mate on Linux" width="920">
+</p>
+
 # Desktop Mate on Linux
+
+[![Release](https://img.shields.io/github/v/release/Mihnea8848/desktop-mate-linux)](https://github.com/Mihnea8848/desktop-mate-linux/releases/latest)
+[![License](https://img.shields.io/github/license/Mihnea8848/desktop-mate-linux)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/Mihnea8848/desktop-mate-linux/total)](https://github.com/Mihnea8848/desktop-mate-linux/releases)
+[![KDE Plasma 6, Wayland](https://img.shields.io/badge/KDE%20Plasma%206-Wayland-1d99f3?logo=kde&logoColor=white)](#what-works)
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/mihnea8848)
 
 Run [Desktop Mate](https://store.steampowered.com/app/3301060/Desktop_Mate/),
 the desktop mascot from Steam, on Linux. She is drawn with a real transparent
@@ -216,6 +227,9 @@ everything I measured, are in [docs/how-it-works.md](docs/how-it-works.md).
 
 Bug reports, test results from other hardware and pull requests are all
 welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+If this project is useful to you and you want to support it, you can buy me a
+coffee on [Ko-fi](https://ko-fi.com/mihnea8848).
 
 ## License
 
