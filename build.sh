@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Builds bin/ghost-bridged (Linux), bin/ghost.exe, bin/dmhook.dll and the test
+# Builds bin/ghost-bridged (Linux), bin/ghost.exe, bin/dmhook.dll, bin/dmstart.exe and the test
 # tools (Windows).
 # Needs gcc, systemd-libs, clang, lld, llvm-ar, mingw-w64-headers, mingw-w64-crt.
 set -e
@@ -22,7 +22,8 @@ win() {
 }
 win -o bin/ghost.exe src/ghost.c
 win -shared -o bin/dmhook.dll src/dmhook.c
+win -municode -o bin/dmstart.exe src/dmstart.c
 for t in enumtest fgprobe wbtest; do
     win -o "bin/tools/$t.exe" "tools/$t.c" -ldwmapi
 done
-echo "built: bin/ghost-bridged bin/ghost.exe bin/dmhook.dll bin/tools/"
+echo "built: bin/ghost-bridged bin/ghost.exe bin/dmhook.dll bin/dmstart.exe bin/tools/"

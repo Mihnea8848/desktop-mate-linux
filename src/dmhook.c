@@ -2,10 +2,12 @@
  * Copyright (c) 2026 Mihnea Gîrbăcică (Mihnea8848)
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * dmhook.dll: loaded into DesktopMate.exe by ghost.exe. Adds a "Linux" section
- * to the game's settings page and saves it to game.conf for launch.sh, a
- * per-character brightness slider to the character settings, and custom
- * characters (VRM models) to the character menu. It also covers two Wine
+ * dmhook.dll: loaded into DesktopMate.exe by dmstart.exe as the game starts
+ * (ghost.exe loads it too, which does nothing when it is already loaded).
+ * Adds a "Linux" section to the game's settings page and saves it to
+ * game.conf for launch.sh, a per-character brightness slider to the
+ * character settings, and custom characters (VRM models) to the character
+ * menu. It also covers two Wine
  * differences the game runs into since version 1.17 (patch_user32).
  *
  * The game renames its il2cpp API exports and crashes callers outside
