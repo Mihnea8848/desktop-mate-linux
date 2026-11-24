@@ -2,6 +2,19 @@
 
 Each section is also the text of the matching GitHub release.
 
+## v0.5.5
+
+Fixes the white screen on fast machines with Desktop Mate 1.17, confirmed
+by the reporter after v0.5.5-beta.1.
+
+### Fixed
+
+- On fast machines Desktop Mate 1.17 covered the screen with a white window
+  (#34). The fix from v0.5.3 for the game picking a hidden Wine window
+  instead of its own loaded a few seconds after the game started, and the
+  game could pick its window before that. `launch.sh` now starts the game
+  through `bin/dmstart.exe`, which loads the fix within about 100 ms.
+
 ## v0.5.5-beta.1
 
 Pre-release: a fix for the white screen on fast machines with Desktop Mate
