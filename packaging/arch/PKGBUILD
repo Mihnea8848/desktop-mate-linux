@@ -22,7 +22,7 @@ optdepends=('git: tools/build-ge-proton.sh'
 provides=('desktop-mate-linux-bin')
 conflicts=('desktop-mate-linux-bin')
 install=$pkgname.install
-# bin/ghost.exe and bin/dmhook.dll are Windows programs
+# bin/ghost.exe, bin/dmhook.dll and bin/dmstart.exe are Windows programs
 options=('!strip' '!debug')
 source=("$url/releases/download/v$pkgver/$pkgname-v$pkgver.tar.gz")
 sha256sums=('SKIP')

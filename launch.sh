@@ -260,6 +260,21 @@ main() {
         BRIDGE=''
     fi
 
+    # start the game through bin/dmstart.exe, which loads dmhook.dll as soon as
+    # the game starts instead of when ghost.exe gets to it seconds later
+    if [ -n "$BRIDGE" ] && [ "${DM_HOOK:-1}" != 0 ] && [ -f "$DIR/bin/dmstart.exe" ]; then
+        n=$#
+        while [ $n -gt 0 ]; do
+            a=$1
+            shift
+            n=$((n - 1))
+            case "$a" in
+            */DesktopMate.exe) set -- "$@" "$DIR/bin/dmstart.exe" "$a" ;;
+            *) set -- "$@" "$a" ;;
+            esac
+        done
+    fi
+
     DPID='' WPID='' KPID='' PICKPID=''
     trap cleanup EXIT
     trap 'exit 143' INT TERM HUP

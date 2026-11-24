@@ -29,7 +29,10 @@ the game window kept a Wine title bar, and dragging the character to another
 monitor moved nothing. `dmhook.dll` replaces `EnumWindows` inside the game so
 that the game's windows other than `UnityWndClass` are skipped. 1.17 also asks
 for each monitor's scale with an undocumented `DisplayConfigGetDeviceInfo`
-request that Wine rejects; `dmhook.dll` answers it like Windows at 100%.
+request that Wine rejects; `dmhook.dll` answers it like Windows at 100%. Both
+fixes have to be in place before the game looks up its window, which on a
+fast machine is within a few seconds of starting, so `launch.sh` starts the
+game through `bin/dmstart.exe`, which loads `dmhook.dll` within about 100 ms.
 
 Other windows. The game finds windows with Win32 calls such as `EnumWindows`
 and `GetWindowRect`. Under Wine these only return Wine windows. The bridge
@@ -92,8 +95,10 @@ a frozen image. `launch.sh` watches the link and restores it, and
 
 ## Linux Patch Settings in the game's settings
 
-`ghost.exe` loads `dmhook.dll` into the game process. The game is protected
-against mods, so a few things are needed before the library can do anything:
+`dmstart.exe` loads `dmhook.dll` into the game process as it starts
+(`ghost.exe` does too, for when the game was started another way). The game
+is protected against mods, so a few things are needed before the library can
+do anything:
 
 - The il2cpp API functions are exported under random names.
   `scripts/il2cpp-map.py` recovers the real names from `UnityPlayer.dll`, which
