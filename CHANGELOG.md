@@ -2,7 +2,11 @@
 
 Each section is also the text of the matching GitHub release.
 
-## Unreleased
+## v0.5.5-beta.1
+
+Pre-release: a fix for the white screen on fast machines with Desktop Mate
+1.17. I could not reproduce the white screen here, so the pacman repository
+and the daily update stay on v0.5.4 until it is confirmed.
 
 ### Fixed
 
